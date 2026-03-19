@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Normal vs FLUX — Real Performance</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800;900&display=swap');
+
+:root {
+  --bg: #03050a;
+  --surface: #080d14;
+  --border: #0f1a24;
+  --border2: #162130;
+  --text: #c8d8e8;
+  --muted: #2a3a4a;
+  --muted2: #1a2535;
+  --react: #61dafb;
+  --flux: #a3e635;
+  --flux-dim: #3d5214;
+  --react-dim: #0a2535;
+  --red: #f87171;
+  --mono: 'JetBrains Mono', monospace;
+  --display: 'Syne', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0 }
+html { scroll-behavior: smooth }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ── Header ── */
+.header {
+  padding: 3rem 2rem 2rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(163,230,53,.04), transparent);
+}
+.header h1 {
+  font-family: var(--display);
+  font-size: clamp(1.75rem, 4vw, 3rem);
+  font-weight: 900;
+  letter-spacing: -.04em;
+  margin-bottom: .5rem;
+  position: relative;
+}
+.header h1 em { color: var(--flux); font-style: normal }
+.header p {
+  font-size: .8rem;
+  color: var(--muted);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  position: relative;
+}
+
+/* ── Layout ── */
+.arena {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+@media(max-width: 900px) { .arena { grid-template-columns: 1fr } }
+
+.panel {
+  border-right: 1px solid var(--border);
+  min-height: 100vh;
+}
+.panel:last-child { border-right: none }
+
+.panel-header {
+  padding: 1.25rem 1.75rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(12px);
+}
+.panel-header.react-h { background: rgba(3,5,10,.9); border-top: 2px solid var(--react) }
+.panel-header.flux-h  { background: rgba(3,5,10,.9); border-top: 2px solid var(--flux) }
+
+.panel-title {
+  font-family: var(--display);
+  font-size: .9rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+.panel-title.react { color: var(--react) }
+.panel-title.flux  { color: var(--flux) }
+
+.panel-badge {
+  font-size: .65rem;
+  padding: .2rem .6rem;
+  border-radius: .25rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.panel-badge.react { background: var(--react-dim); color: var(--react); border: 1px solid rgba(97,218,251,.15) }
+.panel-badge.flux  { background: var(--flux-dim);  color: var(--flux);  border: 1px solid rgba(163,230,53,.2) }
+
+/* ── Metrics bar ── */
+.metrics-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.metric {
+  flex: 1;
+  padding: .875rem 1rem;
+  text-align: center;
+  border-right: 1px solid var(--border);
+}
+.metric:last-child { border-right: none }
+.metric-val {
+  font-family: var(--display);
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: -.04em;
+  line-height: 1;
+}
+.metric-val.bad  { color: var(--react) }
+.metric-val.good { color: var(--flux) }
+.metric-val.win  { color: var(--flux) }
+.metric-lbl {
+  font-size: .58rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-top: .3rem;
+}
+
+/* ── Terminal simulation ── */
+.terminal {
+  padding: 1.5rem 1.75rem;
+  border-bottom: 1px solid var(--border);
+  min-height: 200px;
+}
+.terminal-label {
+  font-size: .62rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  margin-bottom: .875rem;
+}
+.chat-msg {
+  display: flex;
+  gap: .875rem;
+  margin-bottom: 1rem;
+  animation: fadeIn .3s ease;
+}
+.chat-msg.user { flex-direction: row-reverse }
+@keyframes fadeIn { from { opacity:0; transform:translateY(4px) } to { opacity:1; transform:none } }
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .65rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.avatar.user-av  { background: #1e293b; color: #94a3b8 }
+.avatar.claude-av{ background: rgba(163,230,53,.15); color: var(--flux); border: 1px solid var(--flux-dim) }
+
+.bubble {
+  max-width: 85%;
+  padding: .625rem .875rem;
+  border-radius: .75rem;
+  font-size: .75rem;
+  line-height: 1.6;
+}
+.bubble.user   { background: #0f1a24; color: #94a3b8; border: 1px solid var(--border2) }
+.bubble.claude { background: var(--surface); border: 1px solid var(--border2) }
+.bubble.claude.react-bubble { border-color: rgba(97,218,251,.1) }
+.bubble.claude.flux-bubble  { border-color: rgba(163,230,53,.1) }
+
+.typing {
+  display: inline-flex;
+  gap: 3px;
+  padding: .4rem .6rem;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: .5rem;
+}
+.typing span {
+  width: 5px; height: 5px;
+  background: var(--muted);
+  border-radius: 50%;
+  animation: dot 1.2s ease-in-out infinite;
+}
+.typing span:nth-child(2) { animation-delay: .2s }
+.typing span:nth-child(3) { animation-delay: .4s }
+@keyframes dot { 0%,80%,100%{transform:scale(.8);opacity:.4} 40%{transform:scale(1);opacity:1} }
+
+/* Code output */
+.code-stream {
+  background: #000;
+  border: 1px solid var(--border2);
+  border-radius: .5rem;
+  padding: .875rem 1rem;
+  font-size: .7rem;
+  line-height: 1.65;
+  max-height: 240px;
+  overflow-y: auto;
+  position: relative;
+}
+.code-stream::-webkit-scrollbar { width: 4px }
+.code-stream::-webkit-scrollbar-track { background: transparent }
+.code-stream::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px }
+
+.tok-react  { color: #61dafb }
+.tok-flux   { color: #a3e635 }
+.tok-str    { color: #86efac }
+.tok-muted  { color: #334155 }
+.tok-orange { color: #fb923c }
+.tok-white  { color: #e2e8f0 }
+
+.stream-cursor {
+  display: inline-block;
+  width: 6px; height: .85em;
+  background: currentColor;
+  animation: blink .8s step-end infinite;
+  vertical-align: middle;
+  border-radius: 1px;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* ── Progress bars ── */
+.progress-section {
+  padding: 1.25rem 1.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.progress-label {
+  font-size: .62rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  margin-bottom: .875rem;
+}
+.prog-row {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin-bottom: .625rem;
+}
+.prog-name { font-size: .7rem; color: var(--muted); width: 120px; flex-shrink: 0 }
+.prog-track { flex: 1; height: 6px; background: #0a0f1a; border-radius: 999px; overflow: hidden }
+.prog-fill {
+  height: 100%;
+  border-radius: 999px;
+  width: 0;
+  transition: width 1.5s cubic-bezier(.4,0,.2,1);
+}
+.prog-fill.react { background: linear-gradient(90deg, #61dafb, #0ea5e9) }
+.prog-fill.flux  { background: linear-gradient(90deg, #a3e635, #65a30d) }
+.prog-val { font-size: .7rem; font-weight: 700; width: 60px; text-align: right; flex-shrink: 0 }
+.prog-val.react { color: var(--react) }
+.prog-val.flux  { color: var(--flux) }
+
+/* ── Result preview ── */
+.result-section {
+  padding: 1.25rem 1.75rem;
+}
+.result-label {
+  font-size: .62rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  margin-bottom: .875rem;
+}
+.result-files {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.file-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .5rem .875rem;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: .5rem;
+  font-size: .7rem;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: all .4s ease;
+}
+.file-pill.show { opacity: 1; transform: none }
+.file-name { color: var(--text) }
+.file-size { color: var(--muted); font-size: .65rem }
+.file-js   { color: var(--react) }
+.file-flux { color: var(--flux) }
+
+/* ── Bottom summary ── */
+.summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--border);
+  max-width: 1400px;
+  margin: 0 auto;
+}
+.summary-panel {
+  padding: 2rem 1.75rem;
+  border-right: 1px solid var(--border);
+}
+.summary-panel:last-child { border-right: none }
+.summary-title {
+  font-family: var(--display);
+  font-size: .8rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.summary-title.react { color: var(--react) }
+.summary-title.flux  { color: var(--flux) }
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: .4rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: .72rem;
+}
+.summary-row:last-child { border-bottom: none }
+.summary-key { color: var(--muted) }
+.summary-val { font-weight: 700 }
+.summary-val.bad  { color: var(--react) }
+.summary-val.good { color: var(--flux) }
+.summary-val.warn { color: #fbbf24 }
+
+/* ── Controls ── */
+.controls {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+.run-btn {
+  background: var(--flux);
+  color: #000;
+  border: none;
+  padding: .75rem 2rem;
+  border-radius: .625rem;
+  font-size: .85rem;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: var(--mono);
+  letter-spacing: .05em;
+  transition: transform .15s, box-shadow .15s;
+}
+.run-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(163,230,53,.25) }
+.run-btn:active { transform: none }
+.run-btn:disabled { opacity: .5; cursor: not-allowed; transform: none }
+.req-selector {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: .65rem 1rem;
+  border-radius: .625rem;
+  font-size: .8rem;
+  cursor: pointer;
+  font-family: var(--mono);
+}
+
+/* ── Verdict strip ── */
+.verdict {
+  background: linear-gradient(135deg, rgba(163,230,53,.04), rgba(3,5,10,0));
+  border: 1px solid rgba(163,230,53,.1);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  margin: 1.5rem 2rem;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+.verdict-num {
+  font-family: var(--display);
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: var(--flux);
+  letter-spacing: -.05em;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.verdict-text { font-size: .8rem; color: var(--muted); line-height: 1.7 }
+.verdict-text b { color: var(--text) }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Normal Claude vs <em>FLUX Project</em></h1>
+  <p>Same request · Same Claude · Different speed</p>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <select class="req-selector" id="req-sel">
+    <option value="dashboard">Dashboard com tabela e dados ao vivo</option>
+    <option value="landing">SaaS landing page com stats</option>
+    <option value="crud">CRUD de usuários com form</option>
+    <option value="auth">Auth flow (login + redirect)</option>
+  </select>
+  <button class="run-btn" id="run-btn" onclick="runComparison()">▶ COMPARAR</button>
+</div>
+
+<!-- Arena -->
+<div class="arena">
+
+  <!-- LEFT: Normal React -->
+  <div class="panel">
+    <div class="panel-header react-h">
+      <span class="panel-title react">Claude normal</span>
+      <span class="panel-badge react">React / Next.js</span>
+    </div>
+
+    <div class="metrics-bar">
+      <div class="metric"><div class="metric-val bad" id="r-tokens">—</div><div class="metric-lbl">tokens</div></div>
+      <div class="metric"><div class="metric-val bad" id="r-lines">—</div><div class="metric-lbl">linhas</div></div>
+      <div class="metric"><div class="metric-val bad" id="r-time">—</div><div class="metric-lbl">tempo</div></div>
+      <div class="metric"><div class="metric-val bad" id="r-files">—</div><div class="metric-lbl">arquivos</div></div>
+    </div>
+
+    <div class="terminal" id="react-terminal">
+      <div class="terminal-label">Conversa com Claude</div>
+    </div>
+
+    <div class="progress-section">
+      <div class="progress-label">Performance no browser</div>
+      <div class="prog-row">
+        <span class="prog-name">JS baixado</span>
+        <div class="prog-track"><div class="prog-fill react" id="pr-js"></div></div>
+        <span class="prog-val react" id="pv-js">130KB</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-name">Primeiro paint</span>
+        <div class="prog-track"><div class="prog-fill react" id="pr-fcp"></div></div>
+        <span class="prog-val react" id="pv-fcp">320ms</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-name">SEO</span>
+        <div class="prog-track"><div class="prog-fill react" id="pr-seo" style="background:#f87171"></div></div>
+        <span class="prog-val" style="color:#f87171" id="pv-seo">❌ zero</span>
+      </div>
+    </div>
+
+    <div class="result-section">
+      <div class="result-label">Arquivos gerados</div>
+      <div class="result-files" id="react-files"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: FLUX Project -->
+  <div class="panel">
+    <div class="panel-header flux-h">
+      <span class="panel-title flux">Claude + FLUX Project</span>
+      <span class="panel-badge flux">FLUX language</span>
+    </div>
+
+    <div class="metrics-bar">
+      <div class="metric"><div class="metric-val good" id="f-tokens">—</div><div class="metric-lbl">tokens</div></div>
+      <div class="metric"><div class="metric-val good" id="f-lines">—</div><div class="metric-lbl">linhas</div></div>
+      <div class="metric"><div class="metric-val good" id="f-time">—</div><div class="metric-lbl">tempo</div></div>
+      <div class="metric"><div class="metric-val good" id="f-files">—</div><div class="metric-lbl">arquivo</div></div>
+    </div>
+
+    <div class="terminal" id="flux-terminal">
+      <div class="terminal-label">Conversa com Claude + FLUX Project</div>
+    </div>
+
+    <div class="progress-section">
+      <div class="progress-label">Performance no browser</div>
+      <div class="prog-row">
+        <span class="prog-name">JS baixado</span>
+        <div class="prog-track"><div class="prog-fill flux" id="pf-js"></div></div>
+        <span class="prog-val flux" id="pvf-js">10KB</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-name">Primeiro paint</span>
+        <div class="prog-track"><div class="prog-fill flux" id="pf-fcp"></div></div>
+        <span class="prog-val flux" id="pvf-fcp">40ms</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-name">SEO</span>
+        <div class="prog-track"><div class="prog-fill flux" id="pf-seo"></div></div>
+        <span class="prog-val flux" id="pvf-seo">✓ full</span>
+      </div>
+    </div>
+
+    <div class="result-section">
+      <div class="result-label">Arquivos gerados</div>
+      <div class="result-files" id="flux-files"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Summary -->
+<div class="summary">
+  <div class="summary-panel">
+    <div class="summary-title react">React — custo total</div>
+    <div id="react-summary"></div>
+  </div>
+  <div class="summary-panel">
+    <div class="summary-title flux">FLUX — custo total</div>
+    <div id="flux-summary"></div>
+  </div>
+</div>
+
+<!-- Verdict -->
+<div class="verdict" id="verdict" style="display:none">
+  <div class="verdict-num" id="verdict-num">—</div>
+  <div class="verdict-text" id="verdict-text"></div>
+</div>
+
+<script>
+const SCENARIOS = {
+  dashboard: {
+    request: 'Crie um dashboard com tabela de usuários, stats (usuários, MRR, retenção) que atualizam a cada 10 segundos, e um form para adicionar usuário',
+    react: {
+      tokens: 4326, lines: 262, timeSec: 4.3, files: 4,
+      jsKB: 130, fcpMs: 320, seo: false,
+      fileList: [
+        { name: 'app/dashboard/page.tsx', size: '4.2KB', cls: 'file-js' },
+        { name: 'app/layout.tsx',         size: '0.8KB', cls: 'file-js' },
+        { name: 'tailwind.config.ts',     size: '0.6KB', cls: 'tok-muted' },
+        { name: 'next.config.ts',         size: '0.3KB', cls: 'tok-muted' },
+        { name: 'tsconfig.json',          size: '0.4KB', cls: 'tok-muted' },
+      ],
+      codeLines: [
+        ["'use client'", 'tok-muted'],
+        ["import { useEffect, useState, useCallback } from 'react'", 'tok-react'],
+        ["import Link from 'next/link'", 'tok-react'],
+        ['', ''],
+        ['interface User { id: number; name: string; email: string; plan: string; mrr: string }', 'tok-muted'],
+        ['interface Stats { users: number; mrr: number; retention: string }', 'tok-muted'],
+        ['', ''],
+        ['export default function Dashboard() {', 'tok-white'],
+        ['  const [users, setUsers]   = useState<User[]>([])', 'tok-react'],
+        ['  const [stats, setStats]   = useState<Stats>({} as Stats)', 'tok-react'],
+        ['  const [form, setForm]     = useState({ full_name:"", email:"", plan:"starter" })', 'tok-react'],
+        ['  const [loading, setLoading] = useState(false)', 'tok-react'],
+        ['  const [msg, setMsg]       = useState("")', 'tok-react'],
+        ['', ''],
+        ['  const fetchStats = useCallback(() => {', 'tok-orange'],
+        ["    fetch('/api/stats').then(r=>r.json()).then(setStats)", 'tok-orange'],
+        ['  }, [])', 'tok-orange'],
+        ['', ''],
+        ['  useEffect(() => {', 'tok-orange'],
+        ["    fetch('/api/users').then(r=>r.json()).then(setUsers)", 'tok-orange'],
+        ['    fetchStats()', 'tok-orange'],
+        ['    const id = setInterval(fetchStats, 10000)', 'tok-orange'],
+        ['    return () => clearInterval(id)', 'tok-orange'],
+        ['  }, [fetchStats])', 'tok-orange'],
+        ['', ''],
+        ['  const handleSubmit = async (e: React.FormEvent) => {', 'tok-orange'],
+        ['    e.preventDefault()', 'tok-orange'],
+        ['    setLoading(true)', 'tok-orange'],
+        ["    const res = await fetch('/api/users', {", 'tok-orange'],
+        ["      method: 'POST',", 'tok-orange'],
+        ["      headers: { 'Content-Type': 'application/json' },", 'tok-orange'],
+        ['      body: JSON.stringify(form),', 'tok-orange'],
+        ['    })', 'tok-orange'],
+        ['    const data = await res.json()', 'tok-orange'],
+        ['    if (res.ok) { setUsers(p=>[...p,data]); setMsg("Done!") }', 'tok-orange'],
+        ['    else setMsg(data.error || "Error")', 'tok-orange'],
+        ['    setLoading(false)', 'tok-orange'],
+        ['  }', 'tok-orange'],
+        ['', ''],
+        ['  return (', 'tok-white'],
+        ['    <div className="bg-gray-950 text-gray-100 min-h-screen">', 'tok-react'],
+        ['      <nav className="flex items-center justify-between px-8 py-4', 'tok-react'],
+        ['        border-b border-gray-800 sticky top-0 z-50">', 'tok-react'],
+        ['        ...', 'tok-muted'],
+        ['      </nav>', 'tok-react'],
+        ['      ... (220 more lines of JSX + className strings)', 'tok-muted'],
+        ['    </div>', 'tok-react'],
+        ['  )', 'tok-white'],
+        ['}', 'tok-white'],
+      ]
+    },
+    flux: {
+      tokens: 442, lines: 38, timeSec: 0.4, files: 1,
+      jsKB: 10, fcpMs: 40, seo: true,
+      fileList: [
+        { name: 'app.flux', size: '1.1KB', cls: 'file-flux' },
+      ],
+      codeLines: [
+        ['%dashboard dark /dashboard', 'tok-flux'],
+        ['', ''],
+        ['@users = []', 'tok-flux'],
+        ['@stats = {}', 'tok-flux'],
+        ['~mount GET /api/users => @users', 'tok-flux'],
+        ['~mount GET /api/stats => @stats', 'tok-flux'],
+        ['~interval 10000 GET /api/stats => @stats', 'tok-flux'],
+        ['', ''],
+        ['nav{AppName>/logout:Sign out}', 'tok-flux'],
+        ['stats{@stats.users:Users|@stats.mrr:MRR|@stats.retention:Retention}', 'tok-flux'],
+        ['sect{User database}', 'tok-flux'],
+        ['table @users {', 'tok-flux'],
+        ['  Name:name | Email:email | Plan:plan | Status:status | MRR:mrr', 'tok-str'],
+        ['  empty: No users yet.', 'tok-muted'],
+        ['}', 'tok-flux'],
+        ['sect{Add user}', 'tok-flux'],
+        ['form POST /api/users => @users.push($result) {', 'tok-flux'],
+        ['  Full name : text : Alice Johnson', 'tok-str'],
+        ['  Email : email : alice@company.com', 'tok-str'],
+        ['  Plan : select : starter,pro,enterprise', 'tok-str'],
+        ['}', 'tok-flux'],
+        ['foot{AppName Dashboard © 2025}', 'tok-flux'],
+        ['', ''],
+        ['# Done. ✓', 'tok-muted'],
+      ]
+    }
+  },
+  landing: {
+    request: 'Landing page para SaaS com nav, hero, stats vindos da API, 3 cards de features, footer com links',
+    react: {
+      tokens: 2100, lines: 135, timeSec: 2.1, files: 3,
+      jsKB: 130, fcpMs: 280, seo: false,
+      fileList: [
+        { name: 'app/page.tsx',       size: '3.1KB', cls: 'file-js' },
+        { name: 'app/layout.tsx',     size: '0.8KB', cls: 'file-js' },
+        { name: 'tailwind.config.ts', size: '0.6KB', cls: 'tok-muted' },
+      ],
+      codeLines: [
+        ["import { useEffect, useState } from 'react'", 'tok-react'],
+        ["import Link from 'next/link'", 'tok-react'],
+        ['', ''],
+        ['export default function Home() {', 'tok-white'],
+        ['  const [stats, setStats] = useState({})', 'tok-react'],
+        ['  useEffect(() => {', 'tok-orange'],
+        ["    fetch('/api/stats').then(r=>r.json()).then(setStats)", 'tok-orange'],
+        ['  }, [])', 'tok-orange'],
+        ['', ''],
+        ['  return (', 'tok-white'],
+        ['    <div className="bg-gray-950 text-gray-100 min-h-screen font-sans">', 'tok-react'],
+        ['      <nav className="flex items-center justify-between px-8 py-4', 'tok-react'],
+        ['        border-b border-gray-800 sticky top-0 backdrop-blur-sm z-50">', 'tok-react'],
+        ['        <span className="text-xl font-bold tracking-tight">AppName</span>', 'tok-react'],
+        ['        <div className="flex items-center gap-6">', 'tok-react'],
+        ['          <Link href="/pricing" className="text-gray-400 text-sm">Pricing</Link>', 'tok-react'],
+        ['          <Link href="/login"   className="text-gray-400 text-sm">Sign in</Link>', 'tok-react'],
+        ['        </div>', 'tok-react'],
+        ['      </nav>', 'tok-react'],
+        ['      <section className="flex flex-col items-center justify-center', 'tok-react'],
+        ['        min-h-[90vh] text-center px-6">', 'tok-react'],
+        ['        ... (100 more lines)', 'tok-muted'],
+      ]
+    },
+    flux: {
+      tokens: 210, lines: 9, timeSec: 0.2, files: 1,
+      jsKB: 10, fcpMs: 20, seo: true,
+      fileList: [
+        { name: 'home.flux', size: '0.5KB', cls: 'file-flux' },
+      ],
+      codeLines: [
+        ['%home dark /', 'tok-flux'],
+        ['', ''],
+        ['@stats = {}', 'tok-flux'],
+        ['~mount GET /api/stats => @stats', 'tok-flux'],
+        ['', ''],
+        ['nav{AppName>/pricing:Pricing>/login:Sign in}', 'tok-flux'],
+        ['hero{Ship faster with AI|Zero config, infinite scale.>/signup:Start free}', 'tok-flux'],
+        ['stats{@stats.users:Users|@stats.mrr:MRR|@stats.uptime:Uptime}', 'tok-flux'],
+        ['row3{rocket>Deploy>3 seconds from push.|shield>Enterprise>SOC2, GDPR.|chart>Observability>Real-time.}', 'tok-flux'],
+        ['foot{© 2025 AppName>/privacy:Privacy>/terms:Terms}', 'tok-flux'],
+        ['', ''],
+        ['# Done. ✓', 'tok-muted'],
+      ]
+    }
+  },
+  crud: {
+    request: 'Página de gerenciamento de usuários com lista, filtro por status, form para criar novo usuário via POST',
+    react: {
+      tokens: 3200, lines: 198, timeSec: 3.2, files: 3,
+      jsKB: 130, fcpMs: 300, seo: false,
+      fileList: [
+        { name: 'app/users/page.tsx', size: '3.8KB', cls: 'file-js' },
+        { name: 'app/layout.tsx',     size: '0.8KB', cls: 'file-js' },
+        { name: 'tailwind.config.ts', size: '0.6KB', cls: 'tok-muted' },
+      ],
+      codeLines: [
+        ["'use client'", 'tok-muted'],
+        ["import { useEffect, useState } from 'react'", 'tok-react'],
+        ['', ''],
+        ['export default function Users() {', 'tok-white'],
+        ['  const [users, setUsers] = useState([])', 'tok-react'],
+        ['  const [filter, setFilter] = useState("all")', 'tok-react'],
+        ['  const [form, setForm] = useState({ name:"", email:"", plan:"starter" })', 'tok-react'],
+        ['  const [loading, setLoading] = useState(false)', 'tok-react'],
+        ['', ''],
+        ['  const filtered = filter === "all" ? users', 'tok-orange'],
+        ['    : users.filter(u => u.status === filter)', 'tok-orange'],
+        ['', ''],
+        ['  useEffect(() => {', 'tok-orange'],
+        ["    fetch('/api/users').then(r=>r.json()).then(setUsers)", 'tok-orange'],
+        ['  }, [])', 'tok-orange'],
+        ['  ... (170 more lines)', 'tok-muted'],
+      ]
+    },
+    flux: {
+      tokens: 320, lines: 18, timeSec: 0.3, files: 1,
+      jsKB: 10, fcpMs: 35, seo: true,
+      fileList: [
+        { name: 'users.flux', size: '0.8KB', cls: 'file-flux' },
+      ],
+      codeLines: [
+        ['%users dark /users', 'tok-flux'],
+        ['', ''],
+        ['@users = []', 'tok-flux'],
+        ['~mount GET /api/users => @users', 'tok-flux'],
+        ['', ''],
+        ['nav{AppName>/users:Users>/settings:Settings}', 'tok-flux'],
+        ['sect{User Management}', 'tok-flux'],
+        ['table @users {', 'tok-flux'],
+        ['  Name:name | Email:email | Plan:plan | Status:status | MRR:mrr', 'tok-str'],
+        ['  empty: No users yet.', 'tok-muted'],
+        ['}', 'tok-flux'],
+        ['sect{Create User}', 'tok-flux'],
+        ['form POST /api/users => @users.push($result) {', 'tok-flux'],
+        ['  Full name : text : Alice Johnson', 'tok-str'],
+        ['  Email : email : alice@company.com', 'tok-str'],
+        ['  Plan : select : starter,pro,enterprise', 'tok-str'],
+        ['}', 'tok-flux'],
+        ['foot{© 2025 AppName}', 'tok-flux'],
+        ['# Done. ✓', 'tok-muted'],
+      ]
+    }
+  },
+  auth: {
+    request: 'Flow de login com email e senha, POST para /api/auth/login, redirecionar para /dashboard se sucesso',
+    react: {
+      tokens: 1800, lines: 110, timeSec: 1.8, files: 3,
+      jsKB: 130, fcpMs: 260, seo: false,
+      fileList: [
+        { name: 'app/login/page.tsx', size: '2.2KB', cls: 'file-js' },
+        { name: 'app/layout.tsx',     size: '0.8KB', cls: 'file-js' },
+        { name: 'tailwind.config.ts', size: '0.6KB', cls: 'tok-muted' },
+      ],
+      codeLines: [
+        ["'use client'", 'tok-muted'],
+        ["import { useState } from 'react'", 'tok-react'],
+        ["import { useRouter } from 'next/navigation'", 'tok-react'],
+        ['', ''],
+        ['export default function Login() {', 'tok-white'],
+        ['  const router = useRouter()', 'tok-orange'],
+        ['  const [form, setForm] = useState({ email:"", password:"" })', 'tok-react'],
+        ['  const [error, setError] = useState("")', 'tok-react'],
+        ['  const [loading, setLoading] = useState(false)', 'tok-react'],
+        ['', ''],
+        ['  const handleSubmit = async (e) => {', 'tok-orange'],
+        ['    e.preventDefault()', 'tok-orange'],
+        ['    setLoading(true)', 'tok-orange'],
+        ["    const res = await fetch('/api/auth/login', {", 'tok-orange'],
+        ["      method: 'POST',", 'tok-orange'],
+        ["      headers: { 'Content-Type': 'application/json' },", 'tok-orange'],
+        ['      body: JSON.stringify(form)', 'tok-orange'],
+        ['    })', 'tok-orange'],
+        ["    if (res.ok) router.push('/dashboard')", 'tok-orange'],
+        ['    else setError((await res.json()).error)', 'tok-orange'],
+        ['    setLoading(false)', 'tok-orange'],
+        ['  }', 'tok-orange'],
+        ['  ... (80 more lines of JSX)', 'tok-muted'],
+      ]
+    },
+    flux: {
+      tokens: 140, lines: 8, timeSec: 0.1, files: 1,
+      jsKB: 10, fcpMs: 20, seo: true,
+      fileList: [
+        { name: 'login.flux', size: '0.3KB', cls: 'file-flux' },
+      ],
+      codeLines: [
+        ['%login dark /login', 'tok-flux'],
+        ['', ''],
+        ['nav{AppName}', 'tok-flux'],
+        ['hero{Welcome back|Sign in to continue.}', 'tok-flux'],
+        ['form POST /api/auth/login => redirect /dashboard {', 'tok-flux'],
+        ['  Email : email : you@company.com', 'tok-str'],
+        ['  Password : password :', 'tok-str'],
+        ['}', 'tok-flux'],
+        ['foot{© 2025 AppName}', 'tok-flux'],
+        ['# Done. ✓', 'tok-muted'],
+      ]
+    }
+  }
+}
+
+let running = false
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+function addMsg(termId, role, text, cls) {
+  const term = document.getElementById(termId)
+  const msg = document.createElement('div')
+  msg.className = 'chat-msg ' + (role === 'user' ? 'user' : '')
+  const av = document.createElement('div')
+  av.className = 'avatar ' + (role === 'user' ? 'user-av' : 'claude-av')
+  av.textContent = role === 'user' ? 'U' : 'C'
+  const bub = document.createElement('div')
+  bub.className = `bubble ${role} ${cls || ''}`
+  bub.textContent = text
+  msg.appendChild(av)
+  msg.appendChild(bub)
+  term.appendChild(msg)
+  term.scrollTop = term.scrollHeight
+  return bub
+}
+
+function addTyping(termId, cls) {
+  const term = document.getElementById(termId)
+  const msg = document.createElement('div')
+  msg.className = 'chat-msg'
+  const av = document.createElement('div')
+  av.className = 'avatar claude-av'
+  av.textContent = 'C'
+  const typ = document.createElement('div')
+  typ.className = 'typing'
+  typ.innerHTML = '<span></span><span></span><span></span>'
+  msg.appendChild(av)
+  msg.appendChild(typ)
+  msg.id = 'typing-' + termId
+  term.appendChild(msg)
+  term.scrollTop = term.scrollHeight
+}
+
+function removeTyping(termId) {
+  const el = document.getElementById('typing-' + termId)
+  if (el) el.remove()
+}
+
+async function streamCode(termId, lines, color, delayPerLine) {
+  const term = document.getElementById(termId)
+  const msg = document.createElement('div')
+  msg.className = 'chat-msg'
+  const av = document.createElement('div')
+  av.className = 'avatar claude-av'
+  av.textContent = 'C'
+  const bub = document.createElement('div')
+  bub.className = `bubble claude ${color}`
+  const code = document.createElement('div')
+  code.className = 'code-stream'
+  const cursor = document.createElement('span')
+  cursor.className = 'stream-cursor ' + (color.includes('react') ? 'tok-react' : 'tok-flux')
+  bub.appendChild(code)
+  msg.appendChild(av)
+  msg.appendChild(bub)
+  term.appendChild(msg)
+
+  for (const [text, cls] of lines) {
+    const line = document.createElement('div')
+    if (text === '') {
+      line.innerHTML = '&nbsp;'
+    } else {
+      line.className = cls
+      line.textContent = text
+    }
+    code.appendChild(line)
+    code.scrollTop = code.scrollHeight
+    term.scrollTop = term.scrollHeight
+    await sleep(delayPerLine + Math.random() * 20)
+  }
+  cursor.remove()
+}
+
+function showFiles(containerId, files, delay) {
+  const container = document.getElementById(containerId)
+  container.innerHTML = ''
+  files.forEach((f, i) => {
+    const pill = document.createElement('div')
+    pill.className = 'file-pill'
+    pill.innerHTML = `<span class="file-name ${f.cls}">${f.name}</span><span class="file-size">${f.size}</span>`
+    container.appendChild(pill)
+    setTimeout(() => pill.classList.add('show'), delay + i * 120)
+  })
+}
+
+function animateProgress(id, pct, delay) {
+  setTimeout(() => {
+    document.getElementById(id).style.width = pct + '%'
+  }, delay)
+}
+
+function setSummary(containerId, rows) {
+  const el = document.getElementById(containerId)
+  el.innerHTML = rows.map(([k, v, cls]) =>
+    `<div class="summary-row"><span class="summary-key">${k}</span><span class="summary-val ${cls}">${v}</span></div>`
+  ).join('')
+}
+
+async function runComparison() {
+  if (running) return
+  running = true
+  document.getElementById('run-btn').disabled = true
+  document.getElementById('verdict').style.display = 'none'
+
+  const key = document.getElementById('req-sel').value
+  const sc = SCENARIOS[key]
+
+  // Reset
+  document.getElementById('react-terminal').innerHTML = '<div class="terminal-label">Conversa com Claude</div>'
+  document.getElementById('flux-terminal').innerHTML  = '<div class="terminal-label">Conversa com Claude + FLUX Project</div>'
+  document.getElementById('react-files').innerHTML = ''
+  document.getElementById('flux-files').innerHTML  = ''
+  ;['r-tokens','r-lines','r-time','r-files','f-tokens','f-lines','f-time','f-files'].forEach(id => {
+    document.getElementById(id).textContent = '—'
+  })
+  ;['pr-js','pr-fcp','pr-seo','pf-js','pf-fcp','pf-seo'].forEach(id => {
+    document.getElementById(id).style.width = '0'
+  })
+  document.getElementById('react-summary').innerHTML = ''
+  document.getElementById('flux-summary').innerHTML  = ''
+
+  // User message (both panels simultaneously)
+  addMsg('react-terminal', 'user', sc.request, 'react-bubble')
+  addMsg('flux-terminal',  'user', sc.request, 'flux-bubble')
+
+  await sleep(600)
+
+  // Typing indicators
+  addTyping('react-terminal', 'react-bubble')
+  addTyping('flux-terminal',  'flux-bubble')
+
+  // React: thinking delay (longer)
+  await sleep(1400)
+  removeTyping('react-terminal')
+  addMsg('react-terminal', 'claude', 'Aqui está o componente React com TypeScript e Tailwind:', 'react-bubble')
+  await sleep(200)
+
+  // FLUX: thinking delay (shorter — already has context)
+  await sleep(400)
+  removeTyping('flux-terminal')
+  await sleep(200)
+
+  // Stream both simultaneously
+  const msPerLineReact = Math.round(sc.react.timeSec * 1000 / sc.react.lines)
+  const msPerLineFlux  = Math.round(sc.flux.timeSec  * 1000 / sc.flux.lines)
+
+  const reactStream = streamCode('react-terminal', sc.react.codeLines, 'react-bubble', msPerLineReact)
+  const fluxStream  = streamCode('flux-terminal',  sc.flux.codeLines,  'flux-bubble',  msPerLineFlux)
+
+  // Update metrics as streaming happens
+  setTimeout(() => {
+    document.getElementById('f-tokens').textContent = sc.flux.tokens
+    document.getElementById('f-lines').textContent  = sc.flux.lines
+    document.getElementById('f-time').textContent   = sc.flux.timeSec + 's'
+    document.getElementById('f-files').textContent  = sc.flux.files
+  }, sc.flux.timeSec * 1000 + 200)
+
+  setTimeout(() => {
+    document.getElementById('r-tokens').textContent = sc.react.tokens.toLocaleString()
+    document.getElementById('r-lines').textContent  = sc.react.lines
+    document.getElementById('r-time').textContent   = sc.react.timeSec + 's'
+    document.getElementById('r-files').textContent  = sc.react.files + '+'
+  }, sc.react.timeSec * 1000 + 200)
+
+  await Promise.all([reactStream, fluxStream])
+
+  // Show files
+  showFiles('react-files', sc.react.fileList, 100)
+  showFiles('flux-files',  sc.flux.fileList,  100)
+
+  await sleep(600)
+
+  // Animate browser performance bars
+  const maxJS  = 130, maxFCP = 320, maxSEO = 100
+  animateProgress('pr-js',  100, 200)
+  animateProgress('pr-fcp', 100, 300)
+  animateProgress('pr-seo', sc.react.seo ? 100 : 8, 400)
+  animateProgress('pf-js',  (sc.flux.jsKB / maxJS)  * 100, 200)
+  animateProgress('pf-fcp', (sc.flux.fcpMs / maxFCP) * 100, 300)
+  animateProgress('pf-seo', 100, 400)
+
+  await sleep(800)
+
+  // Summary tables
+  const tokenRatio = Math.round(sc.react.tokens / sc.flux.tokens)
+  setSummary('react-summary', [
+    ['Tokens gerados',  sc.react.tokens.toLocaleString(), 'bad'],
+    ['Linhas de código', sc.react.lines, 'bad'],
+    ['Tempo de geração', sc.react.timeSec + 's', 'bad'],
+    ['Arquivos criados', sc.react.files + '+', 'bad'],
+    ['JS no browser',   sc.react.jsKB + 'KB', 'bad'],
+    ['First paint',     sc.react.fcpMs + 'ms', 'bad'],
+    ['SEO',             sc.react.seo ? 'Sim' : 'Não', sc.react.seo ? 'good' : 'warn'],
+    ['Config files',    'Sim (4)', 'warn'],
+  ])
+  setSummary('flux-summary', [
+    ['Tokens gerados',  sc.flux.tokens, 'good'],
+    ['Linhas de código', sc.flux.lines, 'good'],
+    ['Tempo de geração', sc.flux.timeSec + 's', 'good'],
+    ['Arquivos criados', sc.flux.files, 'good'],
+    ['JS no browser',   sc.flux.jsKB + 'KB', 'good'],
+    ['First paint',     sc.flux.fcpMs + 'ms', 'good'],
+    ['SEO',             'Sim (SSG)', 'good'],
+    ['Config files',    'Nenhum', 'good'],
+  ])
+
+  // Verdict
+  await sleep(400)
+  const verdict = document.getElementById('verdict')
+  document.getElementById('verdict-num').textContent = tokenRatio + '×'
+  document.getElementById('verdict-text').innerHTML = `
+    <b>FLUX é ${tokenRatio}× mais rápido para Claude gerar</b> esse app.<br>
+    ${sc.react.tokens.toLocaleString()} tokens vs ${sc.flux.tokens} tokens —
+    ${sc.react.timeSec}s vs ${sc.flux.timeSec}s de geração.<br>
+    No browser: ${sc.react.fcpMs}ms first paint vs ${sc.flux.fcpMs}ms.
+    JS baixado: ${sc.react.jsKB}KB vs ${sc.flux.jsKB}KB.
+    SEO: ${sc.react.seo ? 'ambos' : 'só FLUX'}.
+  `
+  verdict.style.display = 'flex'
+
+  running = false
+  document.getElementById('run-btn').disabled = false
+}
+
+// Auto-run on load
+setTimeout(runComparison, 500)
+</script>
+</body>
+</html>
