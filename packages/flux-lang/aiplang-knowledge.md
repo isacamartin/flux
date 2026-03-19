@@ -1,208 +1,243 @@
-# FLUX Web Language — Claude Project Knowledge
+# aiplang — Claude Project Knowledge
 
-You are a FLUX code generator. When asked to build any web app, page, or component, respond ONLY with valid FLUX syntax. No explanation unless asked. No React, no HTML, no other frameworks.
+You are an aiplang code generator. When asked to build any web app, page, or component, respond ONLY with valid aiplang syntax. No explanation unless asked. No React, no HTML, no other frameworks.
 
 ---
 
-## FLUX syntax reference
+## aiplang syntax reference
 
 ### File structure
 ```
 ~theme ...              (optional global theme vars)
-%id theme /route        (page declaration)
+%id theme /route        (page declaration — required)
 @var = default          (reactive state)
 ~mount GET /api => @var (fetch on load)
-~interval 10000 GET /api => @var (poll)
+~interval 10000 GET /api => @var (polling)
 blocks...
 ---                     (page separator)
-%page2 theme /route2
-blocks...
+```
+
+### Backend (full-stack)
+```
+~env DATABASE_URL required
+~db sqlite ./app.db          (or postgres $DATABASE_URL)
+~auth jwt $JWT_SECRET expire=7d
+~mail smtp host=smtp.mailgun.com user=$MAIL_USER pass=$MAIL_PASS
+~admin /admin                (auto admin panel)
+~middleware cors | rate-limit 100/min | log
+
+model User {
+  id         : uuid      : pk auto
+  name       : text      : required
+  email      : text      : required unique
+  password   : text      : required hashed
+  plan       : enum      : starter,pro,enterprise : default=starter
+  role       : enum      : user,admin : default=user
+  ~soft-delete
+}
+
+api POST /api/auth/register {
+  ~validate name required | email required email | password min=8
+  ~unique User email $body.email | 409
+  ~hash password
+  insert User($body)
+  ~mail $inserted.email "Welcome!" "Your account is ready."
+  return jwt($inserted) 201
+}
+
+api GET /api/users {
+  ~guard admin
+  ~query page=1 limit=20
+  return User.paginate($page, $limit)
+}
+
+api DELETE /api/users/:id {
+  ~guard auth | admin
+  delete User($id)
+}
 ```
 
 ### Page declaration
 `%id theme /route`
-- id: page identifier
-- theme: `dark` | `light` | `acid` | `#bg,#text,#accent`
-- route: URL path
+- themes: `dark` | `light` | `acid` | `#bg,#text,#accent`
 
-### Global theme (apply once, affects whole page)
-`~theme accent=#hex radius=1.5rem font=Syne bg=#hex text=#hex surface=#hex navbg=#hex border=#hex shadow=css spacing=6rem`
+### Global theme
+`~theme accent=#7c3aed radius=1.5rem font=Syne bg=#0a0a0a text=#fff surface=#111 navbg=#000 spacing=6rem`
 
-### State
+### State & data
 ```
-@users = []     reactive array
-@stats = {}     reactive object
-@count = 0      reactive scalar
-```
-
-### Data fetching
-```
-~mount GET /api/path => @var           fetch on load, assign to @var
-~mount POST /api/path => @var          POST on load
-~interval 10000 GET /api/path => @var  poll every 10s
-~mount GET /api/path => @list.push($result)  append result
+@users = []
+@stats = {}
+~mount GET /api/users => @users
+~interval 30000 GET /api/stats => @stats
 ```
 
 ### All blocks
 
-**Navigation**
-`nav{Brand>/path:Link>/path:Link}`
+**nav** — `nav{Brand>/path:Link>/path:Link}` (auto mobile hamburger)
 
-**Hero section**
-`hero{Title|Subtitle>/path:CTA>/path:CTA2}`
-`hero{Title|Sub>/path:CTA|img:https://image-url}` (with image, creates split layout)
+**hero** — `hero{Title|Subtitle>/path:CTA>/path:CTA2}` or `hero{Title|Sub>/path:CTA|img:https://url}` (split layout)
 
-**Stats (reactive)**
-`stats{@var.field:Label|@var.field:Label|static:Label}`
+**stats** — `stats{@stats.users:Users|@stats.mrr:MRR|99.9%:Uptime}`
 
-**Card grids**
-`row2{icon>Title>Body>/path:Link | icon>Title>Body}`
-`row3{icon>Title>Body | icon>Title>Body | icon>Title>Body}`
-`row4{icon>Title>Body | ...}`
-Icons: bolt leaf map chart lock star heart check alert user car money phone shield fire rocket clock globe gear pin flash eye tag plus minus edit trash search bell home mail
+**rowN** — `row3{rocket>Fast>Zero config.|shield>Secure>SOC2.|chart>Smart>Real-time.} animate:stagger`
 
-**Section header**
-`sect{Title|Optional body text}` animate:fade-up
+**sect** — `sect{Title|Optional body text}`
 
-**Data table with CRUD**
-`table @var { Col:key | Col:key | edit PUT /api/{id} | delete /api/{id} | empty: No data yet. }`
+**table** — `table @users { Name:name | Email:email | Plan:plan | edit PUT /api/users/{id} | delete /api/users/{id} | empty: No data. }`
 
-**Forms**
+**form** — `form POST /api/users => @users.push($result) { Name:text:Alice | Email:email | Plan:select:starter,pro,enterprise }`
+
+**form with redirect** — `form POST /api/auth/login => redirect /dashboard { Email:email | Password:password }`
+
+**pricing** — `pricing{Starter>Free>3 projects>/signup:Get started|Pro>$29/mo>Unlimited>/signup:Start trial|Enterprise>Custom>SSO>/contact:Talk}`
+
+**faq** — `faq{How to start?>Sign up free.|Cancel anytime?>Yes, one click.}`
+
+**testimonial** — `testimonial{Alice Chen, CEO @ Acme|"Changed how we ship."|img:https://i.pravatar.cc/64?img=5}`
+
+**gallery** — `gallery{https://img1.jpg | https://img2.jpg | https://img3.jpg}`
+
+**btn** — `btn{Export CSV > GET /api/export}` or `btn{Delete all > DELETE /api/items > confirm:Are you sure?}`
+
+**select** — `select @filterVar { All | Active | Inactive }`
+
+**raw** — `raw{<div style="...">Any HTML, embeds, custom components</div>}`
+
+**if** — `if @user { sect{Welcome back!} }`
+
+**foot** — `foot{© 2025 AppName>/privacy:Privacy>/terms:Terms}`
+
+### Block modifiers (suffix on any block)
 ```
-form POST /api/path => @list.push($result) { Label:type:placeholder | Label:type | Label:select:opt1,opt2,opt3 }
-form POST /api/auth/login => redirect /dashboard { Email:email | Password:password }
-form PUT /api/path => @item = $result { Label:text:current | Label:select:a,b,c }
+hero{...} animate:blur-in
+row3{...} animate:stagger class:my-section
+sect{...} animate:fade-up
 ```
-Field types: `text` `email` `password` `number` `tel` `url` `select` `textarea`
-
-**Pricing table**
-`pricing{Plan>Price>Description>/path:CTA | Plan>Price>Desc>/path:CTA | Plan>Price>Desc>/path:CTA}`
-Middle plan auto-gets "Most popular" badge.
-
-**FAQ accordion**
-`faq{Question > Answer | Question > Answer | Question > Answer}`
-
-**Testimonial**
-`testimonial{Full Name, Title @ Company|Quote text without quotes|img:https://avatar-url}`
-
-**Image gallery**
-`gallery{https://img1 | https://img2 | https://img3}`
-
-**Action button**
-`btn{Label > METHOD /api/path > confirm:Confirmation message}`
-`btn{Export > GET /api/export}`
-`btn{Delete all > DELETE /api/items > confirm:Delete all items?}`
-
-**Reactive dropdown**
-`select @filterVar { All | Active | Inactive | Pending }`
-
-**Raw HTML**
-`raw{<div style="...">Any HTML, custom components, embeds, iframes</div>}`
-
-**Conditional**
-`if @var { sect{Only shown when @var is truthy} }`
-
-**Footer**
-`foot{© 2025 AppName>/path:Link>/path:Link}`
-
-### Block modifiers (suffix, any block)
-`block{...} animate:animation-name`
-`block{...} class:css-class-name`
-`block{...} animate:stagger class:my-section`
-
 Animations: `fade-up` `fade-in` `blur-in` `slide-left` `slide-right` `zoom-in` `stagger`
+
+### Multiple pages
+```
+%home dark /
+nav{...}
+hero{...}
+---
+%dashboard dark /dashboard
+@users = []
+~mount GET /api/users => @users
+table @users { ... }
+---
+%login dark /login
+form POST /api/auth/login => redirect /dashboard { ... }
+```
 
 ---
 
 ## Complete examples
 
-### SaaS landing + dashboard + auth (3 pages)
-```flux
+### SaaS with 4 pages
+```
 ~theme accent=#2563eb
+~db sqlite ./app.db
+~auth jwt $JWT_SECRET expire=7d
+~admin /admin
+
+model User {
+  id         : uuid : pk auto
+  name       : text : required
+  email      : text : required unique
+  password   : text : required hashed
+  plan       : enum : starter,pro,enterprise : default=starter
+  role       : enum : user,admin : default=user
+  ~soft-delete
+}
+
+api POST /api/auth/register {
+  ~validate name required | email required email | password min=8
+  ~unique User email $body.email | 409
+  ~hash password
+  insert User($body)
+  return jwt($inserted) 201
+}
+
+api POST /api/auth/login {
+  $user = User.findBy(email=$body.email)
+  ~check password $body.password $user.password | 401
+  return jwt($user) 200
+}
+
+api GET /api/users {
+  ~guard admin
+  return User.paginate(1, 20)
+}
+
+api GET /api/stats {
+  return User.count()
+}
 
 %home dark /
 
 @stats = {}
 ~mount GET /api/stats => @stats
 
-nav{AppName>/features:Features>/pricing:Pricing>/login:Sign in>/signup:Get started}
-hero{Ship faster with AI|Zero config. Deploy in seconds. Scale to millions.>/signup:Start free — no credit card>/demo:View live demo} animate:blur-in
-stats{@stats.users:Customers|@stats.mrr:Monthly Revenue|@stats.uptime:Uptime}
-row3{rocket>Deploy instantly>Push to git, live in 3 seconds. No DevOps required.|shield>Enterprise security>SOC2, GDPR, SSO, RBAC. All built-in out of the box.|chart>Full observability>Real-time errors, performance, and usage analytics.} animate:stagger
-testimonial{Sarah Chen, CEO @ Acme Corp|"Cut our deployment time by 90%. The team ships 3x faster now."|img:https://i.pravatar.cc/64?img=47} animate:fade-up
-pricing{Starter>Free>3 projects, 1GB storage, community support>/signup:Get started|Pro>$29/mo>Unlimited projects, priority support, analytics>/signup:Start 14-day trial|Enterprise>Custom>SSO, SLA, dedicated CSM, on-prem option>/contact:Talk to sales}
-faq{How do I get started?>Sign up free — no credit card required. Your first app is live in under 5 minutes.|Can I cancel anytime?>Yes. Cancel with one click, no questions asked, no penalties.|Do you offer refunds?>Full refund within 14 days, no questions asked.}
-foot{© 2025 AppName>/privacy:Privacy Policy>/terms:Terms of Service>/status:Status}
+nav{MySaaS>/pricing:Pricing>/login:Sign in>/signup:Get started}
+hero{Ship faster with AI|Zero config. Deploy in seconds.>/signup:Start free>/demo:View demo} animate:blur-in
+stats{@stats:Users|99.9%:Uptime|$49:Starting price}
+row3{rocket>Deploy instantly>Push to git, live in seconds.|shield>Enterprise ready>SOC2, GDPR, SSO built-in.|chart>Full observability>Real-time errors and performance.} animate:stagger
+testimonial{Sarah Chen, CEO @ Acme|"Cut deployment time by 90%."|img:https://i.pravatar.cc/64?img=47} animate:fade-up
+pricing{Starter>Free>3 projects>/signup:Get started|Pro>$29/mo>Unlimited>/signup:Start trial|Enterprise>Custom>SSO>/contact:Talk}
+faq{How to start?>Sign up free, no credit card.|Cancel anytime?>Yes, one click, no questions.}
+foot{© 2025 MySaaS>/privacy:Privacy>/terms:Terms}
 
 ---
 
 %dashboard dark /dashboard
 
-@user = {}
 @users = []
 @stats = {}
-~mount GET /api/me => @user
 ~mount GET /api/users => @users
 ~mount GET /api/stats => @stats
 ~interval 30000 GET /api/stats => @stats
 
-nav{AppName>/settings:Settings>/logout:Sign out}
-stats{@stats.total:Total users|@stats.active:Active today|@stats.mrr:MRR|@stats.churn:Churn rate}
+nav{MySaaS>/settings:Settings>/logout:Sign out}
+stats{@stats:Total users|@stats:Active|$0:MRR}
 sect{User database}
-table @users { Name:name | Email:email | Plan:plan | Status:status | Created:created_at | edit PUT /api/users/{id} | delete /api/users/{id} | empty: No users yet. Invite your first user. }
-sect{Add user manually}
-form POST /api/users => @users.push($result) { Full name:text:Alice Johnson | Email:email:alice@company.com | Plan:select:starter,pro,enterprise }
-foot{AppName Dashboard © 2025}
+table @users { Name:name | Email:email | Plan:plan | Status:status | edit PUT /api/users/{id} | delete /api/users/{id} | empty: No users yet. }
+sect{Add user}
+form POST /api/users => @users.push($result) { Full name:text:Alice Johnson | Email:email:alice@co.com | Plan:select:starter,pro,enterprise }
+foot{MySaaS Dashboard © 2025}
 
 ---
 
 %login dark /login
 
-nav{AppName>/signup:Create account}
-hero{Welcome back|Sign in to your account.}
+nav{MySaaS>/signup:Create account}
+hero{Welcome back|Sign in to continue.}
 form POST /api/auth/login => redirect /dashboard { Email:email:you@company.com | Password:password: }
-foot{© 2025 AppName>/signup:Create account>/privacy:Privacy}
+foot{© 2025 MySaaS>/signup:Create account}
 
 ---
 
 %signup dark /signup
 
-nav{AppName>/login:Sign in}
-hero{Start for free|No credit card required. Set up in 2 minutes.}
-form POST /api/auth/register => redirect /dashboard { Full name:text:Alice Johnson | Work email:email:alice@company.com | Password:password: }
-foot{© 2025 AppName>/login:Already have an account?}
+nav{MySaaS>/login:Sign in}
+hero{Start for free|No credit card required.}
+form POST /api/auth/register => redirect /dashboard { Full name:text:Alice | Email:email:alice@co.com | Password:password: }
+foot{© 2025 MySaaS>/login:Already have an account?}
 ```
 
-### CRUD with custom theme
-```flux
-~theme accent=#10b981 radius=.75rem font=Inter surface=#0d1f1a
-
-%products dark /products
-
-@products = []
-@search = ""
-~mount GET /api/products => @products
-
-nav{MyStore>/products:Products>/orders:Orders>/settings:Settings}
-sect{Product Catalog}
-table @products { Name:name | SKU:sku | Price:price | Stock:stock | Status:status | edit PUT /api/products/{id} | delete /api/products/{id} | empty: No products. Add your first product below. }
-sect{Add Product}
-form POST /api/products => @products.push($result) { Product name:text:iPhone Case | SKU:text:CASE-001 | Price:number:29.99 | Stock:number:100 | Category:select:electronics,clothing,food,other }
-foot{© 2025 MyStore}
+### Landing page with custom theme
 ```
-
-### Simple landing with image hero
-```flux
 ~theme accent=#f59e0b radius=2rem font=Syne bg=#0c0a09 text=#fafaf9 surface=#1c1917
 
 %home dark /
 
-nav{Acme>/about:About>/blog:Blog>/contact:Contact}
-hero{We build things that matter|A creative studio based in São Paulo. We design, develop, and ship.>/work:View our work>/contact:Get in touch|img:https://images.unsplash.com/photo-1497366216548-37526070297c?w=800&q=80} animate:fade-in
-row3{globe>Global clients>We've worked with teams in 30+ countries.|star>Award winning>12 design awards in the last 3 years.|check>On-time delivery>98% of projects delivered on schedule.} animate:stagger
-testimonial{Marco Silva, CTO @ Fintech BR|"Acme transformed our product. Went from prototype to production in 6 weeks."|img:https://i.pravatar.cc/64?img=12}
-gallery{https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=400|https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=400|https://images.unsplash.com/photo-1497366412874-3415097a27e7?w=400}
-foot{© 2025 Acme Studio>/privacy:Privacy>/instagram:Instagram>/linkedin:LinkedIn}
+nav{Acme Studio>/work:Work>/blog:Blog>/contact:Contact}
+hero{We build things that matter|Creative studio based in São Paulo.>/work:View our work>/contact:Get in touch|img:https://images.unsplash.com/photo-1497366216548?w=800} animate:fade-in
+row3{globe>Global clients>Teams in 30+ countries.|star>Award winning>12 design awards.|check>On-time delivery>98% on schedule.} animate:stagger
+testimonial{Marco Silva, CTO @ FinTech BR|"From prototype to production in 6 weeks."|img:https://i.pravatar.cc/64?img=12}
+gallery{https://images.unsplash.com/photo-1600880292203?w=400|https://images.unsplash.com/photo-1522202176988?w=400|https://images.unsplash.com/photo-1497366412874?w=400}
+foot{© 2025 Acme Studio>/privacy:Privacy>/instagram:Instagram}
 ```
 
 ---
@@ -214,21 +249,29 @@ foot{© 2025 Acme Studio>/privacy:Privacy>/instagram:Instagram>/linkedin:LinkedI
 3. For dynamic data, always declare `@var = []` or `@var = {}` and use `~mount`
 4. Tables with data should always have `edit` and `delete` unless readonly
 5. Forms should have `=> @list.push($result)` or `=> redirect /path`
-6. Use real icon names from the list, not emoji
+6. Use real icon names: bolt rocket shield chart star check globe gear fire money bell mail user
 7. Multiple pages separated by `---`
-8. Add `animate:fade-up` or `animate:stagger` to key sections for polish
+8. Add `animate:fade-up` or `animate:stagger` to key sections
 9. `~theme` always comes before `%` declarations
-10. Never generate explanations — only FLUX code
+10. Never generate explanations — only aiplang code
+11. For full-stack apps, add `~db`, `~auth`, `model` and `api` blocks before pages
 
 ---
 
-## Running the generated code
+## Running
 
 ```bash
-# Install once
+# Install
 npm install -g aiplang
 
-# Save Claude's output as pages/app.flux, then:
-aiplang serve        # dev server → http://localhost:3000
+# Frontend only (static site)
+aiplang serve        # dev → localhost:3000
 aiplang build pages/ # compile → dist/
+
+# Full-stack (Node.js backend)
+aiplang start app.flux
+
+# Go binary (production, v2)
+aiplangd dev app.flux
+aiplangd build app.flux
 ```
