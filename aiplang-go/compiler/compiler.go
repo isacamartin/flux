@@ -1,7 +1,7 @@
 // aiplang v2 Compiler
 // Parses .flux source into an AppDef (models + api routes + pages)
 
-package fluxcompiler
+package aiplangcompiler
 
 import (
 	"fmt"

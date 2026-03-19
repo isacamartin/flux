@@ -3,7 +3,7 @@
 ## Philosophy
 
 aiplang v2 is a complete full-stack language.
-One .flux file = frontend + backend + database + auth + API.
+One .aip file = frontend + backend + database + auth + API.
 Written by AI. Not for humans. Optimized for token density.
 
 ---
@@ -31,7 +31,7 @@ blocks...
 
 ## Environment
 
-```flux
+```aiplang
 ~env DATABASE_URL required
 ~env JWT_SECRET required
 ~env PORT=3000
@@ -42,7 +42,7 @@ blocks...
 
 ## Database
 
-```flux
+```aiplang
 ~db postgres $DATABASE_URL
 ~db mysql    $DATABASE_URL
 ~db sqlite   ./data.db
@@ -53,7 +53,7 @@ blocks...
 
 ## Models (generates SQL tables + CRUD ops)
 
-```flux
+```aiplang
 model User {
   id         : uuid      : pk auto
   name       : text      : required
@@ -86,7 +86,7 @@ model Post {
 
 ## API Routes
 
-```flux
+```aiplang
 api GET /api/users {
   ~guard auth
   ~query page=1 limit=20
@@ -174,7 +174,7 @@ $updated             result of update
 
 Same as aiplang v1 + new reactive bindings:
 
-```flux
+```aiplang
 %dashboard dark /dashboard
 
 @users = []
@@ -194,7 +194,7 @@ foot{© 2025 AppName}
 
 ## Auth config
 
-```flux
+```aiplang
 ~auth jwt $JWT_SECRET expire=7d
 ~auth session $SESSION_SECRET expire=30d
 ~auth google $GOOGLE_CLIENT_ID $GOOGLE_SECRET
@@ -205,7 +205,7 @@ foot{© 2025 AppName}
 
 ## Cache
 
-```flux
+```aiplang
 ~cache redis $REDIS_URL ttl=300
 ~cache memory ttl=60
 ```
@@ -214,7 +214,7 @@ foot{© 2025 AppName}
 
 ## Middleware (runs before all routes)
 
-```flux
+```aiplang
 ~middleware cors origins=* | rate-limit 100/min | log
 ```
 
@@ -222,7 +222,7 @@ foot{© 2025 AppName}
 
 ## Complete example — SaaS app
 
-```flux
+```aiplang
 ~env DATABASE_URL required
 ~env JWT_SECRET required
 ~env PORT=3000
@@ -353,7 +353,7 @@ aiplangd deploy app.flux           # deploy to Fly.io / Railway / Render
 ## Output — what aiplangd generates
 
 ```
-.flux source
+.aip source
   ↓ compiler
 Go HTTP server (net/http)
   ├── /api/* routes (generated handlers)

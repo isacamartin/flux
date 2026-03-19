@@ -4,7 +4,7 @@
 
 ## What it is
 
-aiplang v2 is a complete web language. One `.flux` file replaces:
+aiplang v2 is a complete web language. One `.aip` file replaces:
 - Next.js (frontend)
 - Express/Fastify (backend API)
 - Prisma/GORM (database ORM)
@@ -30,7 +30,7 @@ Written by AI. Not designed for humans. Optimized for token density.
 
 ## Example — complete SaaS in 80 lines
 
-```flux
+```aiplang
 ~env DATABASE_URL required
 ~env JWT_SECRET required
 
@@ -133,7 +133,7 @@ aiplangd dev myapp.flux
 ## Language reference
 
 ### Config directives
-```flux
+```aiplang
 ~env NAME required | NAME=default
 ~db postgres $DATABASE_URL | mysql $URL | sqlite ./file.db
 ~auth jwt $SECRET expire=7d | session $SECRET
@@ -141,7 +141,7 @@ aiplangd dev myapp.flux
 ```
 
 ### Models
-```flux
+```aiplang
 model Name {
   field : type : modifiers
 }
@@ -152,7 +152,7 @@ model Name {
 **Modifiers:** `pk` `auto` `required` `unique` `hashed` `default=value` `ref Model`
 
 ### API routes
-```flux
+```aiplang
 api METHOD /path {
   ~guard auth | admin | owner
   ~validate field required | field email | field min=N
@@ -169,7 +169,7 @@ api METHOD /path {
 ```
 
 ### Frontend pages
-```flux
+```aiplang
 %id theme /route
 @var = defaultValue
 ~mount GET /api/path => @var

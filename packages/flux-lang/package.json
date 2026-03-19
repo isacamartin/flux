@@ -1,16 +1,17 @@
 {
   "name": "aiplang",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "AI-first full-stack language. Frontend + Backend + DB + Auth in one file. Competes with Laravel.",
   "keywords": [
-    "flux",
+    "aiplang",
     "ai",
     "web",
     "language",
     "compiler",
     "ssg",
     "reactive",
-    "claude"
+    "claude",
+    "full-stack"
   ],
   "author": "isacamartin",
   "license": "MIT",
@@ -31,7 +32,7 @@
     "runtime/",
     "server/",
     "README.md",
-    "FLUX-PROJECT-KNOWLEDGE.md"
+    "aiplang-knowledge.md"
   ],
   "engines": {
     "node": ">=16"

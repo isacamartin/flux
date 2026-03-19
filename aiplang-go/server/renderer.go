@@ -1,7 +1,7 @@
 // aiplang v2 HTML Renderer
 // Renders Page AST → pre-rendered HTML with hydration
 
-package fluxserver
+package aiplangserver
 
 import (
 	"fmt"

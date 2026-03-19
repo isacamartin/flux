@@ -31,20 +31,20 @@ func main() {
 		fmt.Println("aiplangd v2.0.0")
 
 	case "dev":
-		fluxFile := getFluxFile(os.Args, 2)
-		runDev(fluxFile)
+		aipFile := getAipFile(os.Args, 2)
+		runDev(aipFile)
 
 	case "start":
-		fluxFile := getFluxFile(os.Args, 2)
-		runServer(fluxFile, false)
+		aipFile := getAipFile(os.Args, 2)
+		runServer(aipFile, false)
 
 	case "migrate":
-		fluxFile := getFluxFile(os.Args, 2)
-		runMigrate(fluxFile)
+		aipFile := getAipFile(os.Args, 2)
+		runMigrate(aipFile)
 
 	case "build":
-		fluxFile := getFluxFile(os.Args, 2)
-		runBuild(fluxFile)
+		aipFile := getAipFile(os.Args, 2)
+		runBuild(aipFile)
 
 	default:
 		// Treat as file path (aiplangd app.flux)
@@ -79,7 +79,7 @@ func printHelp() {
 `)
 }
 
-func getFluxFile(args []string, idx int) string {
+func getAipFile(args []string, idx int) string {
 	if len(args) <= idx {
 		fmt.Fprintf(os.Stderr, "\n  ✗  No .flux file specified\n\n")
 		os.Exit(1)
@@ -92,7 +92,7 @@ func getFluxFile(args []string, idx int) string {
 	return file
 }
 
-func parseFluxFile(file string) *fc.AppDef {
+func parseAipFile(file string) *fc.AppDef {
 	src, err := os.ReadFile(file)
 	if err != nil {
 		log.Fatalf("[aiplang] cannot read %s: %v", file, err)
@@ -104,9 +104,9 @@ func parseFluxFile(file string) *fc.AppDef {
 	return app
 }
 
-func runServer(fluxFile string, dev bool) {
-	app := parseFluxFile(fluxFile)
-	printAppSummary(app, fluxFile, dev)
+func runServer(aipFile string, dev bool) {
+	app := parseAipFile(aipFile)
+	printAppSummary(app, aipFile, dev)
 
 	srv, err := fs.New(app)
 	if err != nil {
@@ -118,11 +118,11 @@ func runServer(fluxFile string, dev bool) {
 	}
 }
 
-func runDev(fluxFile string) {
-	fmt.Printf("\n  aiplangd dev — watching %s\n", fluxFile)
+func runDev(aipFile string) {
+	fmt.Printf("\n  aiplangd dev — watching %s\n", aipFile)
 
-	app := parseFluxFile(fluxFile)
-	printAppSummary(app, fluxFile, true)
+	app := parseAipFile(aipFile)
+	printAppSummary(app, aipFile, true)
 
 	srv, err := fs.New(app)
 	if err != nil {
@@ -134,10 +134,10 @@ func runDev(fluxFile string) {
 		var lastMod time.Time
 		for {
 			time.Sleep(500 * time.Millisecond)
-			info, err := os.Stat(fluxFile)
+			info, err := os.Stat(aipFile)
 			if err != nil { continue }
 			if !lastMod.IsZero() && info.ModTime().After(lastMod) {
-				fmt.Printf("\n  [aiplang] %s changed — reloading...\n", filepath.Base(fluxFile))
+				fmt.Printf("\n  [aiplang] %s changed — reloading...\n", filepath.Base(aipFile))
 				// In production would restart gracefully
 				// For now just log the change
 			}
@@ -150,9 +150,9 @@ func runDev(fluxFile string) {
 	}
 }
 
-func runMigrate(fluxFile string) {
-	app := parseFluxFile(fluxFile)
-	fmt.Printf("\n  aiplangd migrate — %s\n\n", fluxFile)
+func runMigrate(aipFile string) {
+	app := parseAipFile(aipFile)
+	fmt.Printf("\n  aiplangd migrate — %s\n\n", aipFile)
 
 	if app.DB == nil {
 		fmt.Println("  ✗  No database configured. Add ~db to your .flux file.")
@@ -175,11 +175,11 @@ func runMigrate(fluxFile string) {
 	fmt.Println("\n  Migration complete.\n")
 }
 
-func runBuild(fluxFile string) {
-	app := parseFluxFile(fluxFile)
+func runBuild(aipFile string) {
+	app := parseAipFile(aipFile)
 	outDir := "dist"
 
-	fmt.Printf("\n  aiplangd build — %s\n\n", fluxFile)
+	fmt.Printf("\n  aiplangd build — %s\n\n", aipFile)
 	os.MkdirAll(outDir, 0755)
 
 	for _, page := range app.Pages {

@@ -5,7 +5,7 @@ const fs   = require('fs')
 const path = require('path')
 const http = require('http')
 
-const VERSION     = '2.0.0'
+const VERSION     = '2.0.1'
 const RUNTIME_DIR = path.join(__dirname, '..', 'runtime')
 const cmd         = process.argv[2]
 const args        = process.argv.slice(3)
@@ -101,7 +101,7 @@ foot{© ${y} ${n}}`,
 if (cmd==='init') {
   const tplIdx = args.indexOf('--template')
   const tplName = tplIdx!==-1 ? args[tplIdx+1] : 'default'
-  const name = args.find(a=>!a.startsWith('--')&&a!==tplName)||'flux-app'
+  const name = args.find(a=>!a.startsWith('--')&&a!==tplName)||'aiplang-app'
   const dir  = path.resolve(name), year = new Date().getFullYear()
   if (fs.existsSync(dir)) { console.error(`\n  ✗  Directory "${name}" already exists.\n`); process.exit(1) }
   fs.mkdirSync(path.join(dir,'pages'), {recursive:true})
@@ -184,7 +184,7 @@ if (cmd==='serve'||cmd==='dev') {
     })
   },500)
   require('http').createServer((req,res)=>{
-    if(req.url.split('?')[0]==='/__flux_reload'){
+    if(req.url.split('?')[0]==='/__aiplang_reload'){
       res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache','Access-Control-Allow-Origin':'*'})
       res.write('data: connected\n\n');clients.push(res)
       req.on('close',()=>{clients=clients.filter(c=>c!==res)});return
@@ -196,7 +196,7 @@ if (cmd==='serve'||cmd==='dev') {
     if(!fp){res.writeHead(404);res.end('Not found');return}
     let content=fs.readFileSync(fp)
     if(path.extname(fp)==='.html'){
-      const inject=`\n<script>const __es=new EventSource('/__flux_reload');__es.onmessage=e=>{if(e.data==='reload')location.reload()}</script>`
+      const inject=`\n<script>const __es=new EventSource('/__aiplang_reload');__es.onmessage=e=>{if(e.data==='reload')location.reload()}</script>`
       content=content.toString().replace('</body>',inject+'</body>')
     }
     res.writeHead(200,{'Content-Type':MIME[path.extname(fp)]||'application/octet-stream','Access-Control-Allow-Origin':'*'})
@@ -207,8 +207,8 @@ if (cmd==='serve'||cmd==='dev') {
 
 // ── Dev server (full-stack) ──────────────────────────────────────
 if (cmd === 'start' || cmd === 'run') {
-  const fluxFile = args[0]
-  if (!fluxFile || !fs.existsSync(fluxFile)) {
+  const aipFile = args[0]
+  if (!aipFile || !fs.existsSync(fluxFile)) {
     console.error(`\n  ✗  Usage: aiplang start <app.flux>\n`)
     process.exit(1)
   }
@@ -220,7 +220,7 @@ if (cmd === 'start' || cmd === 'run') {
     process.exit(1)
   }
   console.log(`\n  aiplang full-stack server\n`)
-  require('child_process').spawn(process.execPath, [serverPath, fluxFile, port], {
+  require('child_process').spawn(process.execPath, [serverPath, aipFile, port], {
     stdio: 'inherit', env: { ...process.env, PORT: port }
   })
   return

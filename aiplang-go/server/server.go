@@ -5,7 +5,7 @@
 // - JWT auth middleware
 // - Auto-migration on startup
 
-package fluxserver
+package aiplangserver
 
 import (
 	"context"
@@ -480,7 +480,7 @@ func connectDB(cfg *fc.DBConfig) (*gorm.DB, error) {
 	case "sqlite":
 		return gorm.Open(sqlite.Open(dsn), gormCfg)
 	default:
-		return gorm.Open(sqlite.Open("./flux.db"), gormCfg)
+		return gorm.Open(sqlite.Open("./aiplang.db"), gormCfg)
 	}
 }
 
@@ -612,7 +612,7 @@ func extractBearerToken(r *http.Request) string {
 	h := r.Header.Get("Authorization")
 	if strings.HasPrefix(h, "Bearer ") { return h[7:] }
 	// Also check cookie
-	if c, err := r.Cookie("flux_token"); err == nil { return c.Value }
+	if c, err := r.Cookie("aiplang_token"); err == nil { return c.Value }
 	return ""
 }
 
