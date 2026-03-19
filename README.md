@@ -18,7 +18,7 @@ Ask Claude to generate a page → paste into `pages/home.aiplang` → see it liv
 
 A single `.aiplang` file describes a complete app: frontend, backend, database, auth, email, jobs.
 
-```flux
+```aiplang
 ~db sqlite ./app.db
 ~auth jwt $JWT_SECRET expire=7d
 ~admin /admin
@@ -111,7 +111,7 @@ All blocks accept: animate:fade-up class:my-class | raw{<html>} | foot{text>/pat
 
 ```
 aiplang/
-├── packages/flux-lang/           ← npm package (aiplang CLI + runtime)
+├── packages/aiplang-pkg/           ← npm package (aiplang CLI + runtime)
 │   ├── bin/aiplang.js            ← CLI: init, serve, build, new, start
 │   ├── runtime/aiplang-hydrate.js← 10KB reactive runtime
 │   ├── server/server.js          ← full-stack Node.js server

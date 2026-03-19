@@ -6,7 +6,7 @@ aiplang is a machine-to-machine web language.
 - Written by AI, executed by browser
 - Full SPA capabilities: state, routing, data fetching, forms
 - Competes with React/Next in features, not in readability
-- One .flux file = complete application
+- One .aiplang file = complete application
 
 ---
 
@@ -32,9 +32,9 @@ layout {                     <- layout block
 
 ## Pages (routing)
 
-Multiple pages in one .flux file:
+Multiple pages in one .aiplang file:
 
-```flux
+```aiplang
 %home dark /
 %dashboard dark /dashboard
 %login dark /login
@@ -47,7 +47,7 @@ The runtime handles client-side routing automatically.
 
 ## State
 
-```flux
+```aiplang
 @users = []
 @user = {}
 @count = 0
@@ -61,7 +61,7 @@ State is reactive. Any block bound to `@var` re-renders when it changes.
 
 ## Computed
 
-```flux
+```aiplang
 $total = @items.length
 $filtered = @items.filter(s => s.status == @filter)
 $revenue = @stats.mrr * 12
@@ -73,7 +73,7 @@ Re-evaluates automatically when dependencies change.
 
 ## Lifecycle queries
 
-```flux
+```aiplang
 ~mount GET /api/users => @users
 ~mount GET /api/stats => @stats
 ~mount POST /api/session {token:@token} => @user
@@ -89,7 +89,7 @@ Re-evaluates automatically when dependencies change.
 
 Use `{@var}` or `{@var.field}` anywhere in block content:
 
-```flux
+```aiplang
 hero{{@user.name}|Welcome back>/dashboard:Go to dashboard}
 stat{@stats.total:Users}
 ```
@@ -98,7 +98,7 @@ stat{@stats.total:Users}
 
 ## Blocks (same as AX + reactive)
 
-```flux
+```aiplang
 nav{Brand>/path:Link}
 hero{Title|Sub>/path:CTA}
 stats{@val:label|@val:label}
@@ -111,7 +111,7 @@ foot{text}
 
 ## Table with data binding
 
-```flux
+```aiplang
 table @users {
   Name:name | Email:email | Plan:plan | Status:status | MRR:mrr
 }
@@ -121,7 +121,7 @@ Auto-renders rows from `@users` array.
 Re-renders when `@users` changes.
 Supports empty state:
 
-```flux
+```aiplang
 table @users {
   Name:name | Email:email | Status:status
   empty: No users found.
@@ -132,7 +132,7 @@ table @users {
 
 ## List / feed
 
-```flux
+```aiplang
 list @posts {
   title:title | body:body | /post/{id}:Read more
 }
@@ -142,7 +142,7 @@ list @posts {
 
 ## Form
 
-```flux
+```aiplang
 form POST /api/users => @users.push($result) {
   Name : text : Full name
   Email : email : work@example.com
@@ -157,7 +157,7 @@ Other actions: `=> @users = $result` / `=> reload` / `=> redirect /path`
 
 ## Form (login — redirect on success)
 
-```flux
+```aiplang
 form POST /api/auth/login => redirect /dashboard {
   Email : email : you@example.com
   Password : password :
@@ -168,7 +168,7 @@ form POST /api/auth/login => redirect /dashboard {
 
 ## Conditionals
 
-```flux
+```aiplang
 if @loading {
   sect{Loading...}
 }
@@ -186,7 +186,7 @@ if @error {
 
 ## Actions (event handlers)
 
-```flux
+```aiplang
 btn{Delete>/api/users/{@selected.id}:DELETE => @users.filter(u => u.id != @selected.id)}
 btn{Refresh>~reload @users}
 btn{Filter active>@filter = "active"}
@@ -196,7 +196,7 @@ btn{Filter active>@filter = "active"}
 
 ## Multi-page app example
 
-```flux
+```aiplang
 %home dark /
 
 ~mount GET /api/stats => @stats

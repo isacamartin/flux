@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Normal vs FLUX — Real Performance</title>
+<title>Normal vs aiplang — Real Performance</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800;900&display=swap');
 
@@ -16,8 +16,8 @@
   --muted: #2a3a4a;
   --muted2: #1a2535;
   --react: #61dafb;
-  --flux: #a3e635;
-  --flux-dim: #3d5214;
+  --aiplang: #a3e635;
+  --aiplang-dim: #3d5214;
   --react-dim: #0a2535;
   --red: #f87171;
   --mono: 'JetBrains Mono', monospace;
@@ -56,7 +56,7 @@ body {
   margin-bottom: .5rem;
   position: relative;
 }
-.header h1 em { color: var(--flux); font-style: normal }
+.header h1 em { color: var(--aiplang); font-style: normal }
 .header p {
   font-size: .8rem;
   color: var(--muted);
@@ -93,7 +93,7 @@ body {
   backdrop-filter: blur(12px);
 }
 .panel-header.react-h { background: rgba(3,5,10,.9); border-top: 2px solid var(--react) }
-.panel-header.flux-h  { background: rgba(3,5,10,.9); border-top: 2px solid var(--flux) }
+.panel-header.aiplang-h  { background: rgba(3,5,10,.9); border-top: 2px solid var(--aiplang) }
 
 .panel-title {
   font-family: var(--display);
@@ -102,7 +102,7 @@ body {
   letter-spacing: .02em;
 }
 .panel-title.react { color: var(--react) }
-.panel-title.flux  { color: var(--flux) }
+.panel-title.aiplang  { color: var(--aiplang) }
 
 .panel-badge {
   font-size: .65rem;
@@ -113,7 +113,7 @@ body {
   text-transform: uppercase;
 }
 .panel-badge.react { background: var(--react-dim); color: var(--react); border: 1px solid rgba(97,218,251,.15) }
-.panel-badge.flux  { background: var(--flux-dim);  color: var(--flux);  border: 1px solid rgba(163,230,53,.2) }
+.panel-badge.aiplang  { background: var(--aiplang-dim);  color: var(--aiplang);  border: 1px solid rgba(163,230,53,.2) }
 
 /* ── Metrics bar ── */
 .metrics-bar {
@@ -136,8 +136,8 @@ body {
   line-height: 1;
 }
 .metric-val.bad  { color: var(--react) }
-.metric-val.good { color: var(--flux) }
-.metric-val.win  { color: var(--flux) }
+.metric-val.good { color: var(--aiplang) }
+.metric-val.win  { color: var(--aiplang) }
 .metric-lbl {
   font-size: .58rem;
   color: var(--muted);
@@ -181,7 +181,7 @@ body {
   margin-top: 2px;
 }
 .avatar.user-av  { background: #1e293b; color: #94a3b8 }
-.avatar.claude-av{ background: rgba(163,230,53,.15); color: var(--flux); border: 1px solid var(--flux-dim) }
+.avatar.claude-av{ background: rgba(163,230,53,.15); color: var(--aiplang); border: 1px solid var(--aiplang-dim) }
 
 .bubble {
   max-width: 85%;
@@ -193,7 +193,7 @@ body {
 .bubble.user   { background: #0f1a24; color: #94a3b8; border: 1px solid var(--border2) }
 .bubble.claude { background: var(--surface); border: 1px solid var(--border2) }
 .bubble.claude.react-bubble { border-color: rgba(97,218,251,.1) }
-.bubble.claude.flux-bubble  { border-color: rgba(163,230,53,.1) }
+.bubble.claude.aiplang-bubble  { border-color: rgba(163,230,53,.1) }
 
 .typing {
   display: inline-flex;
@@ -230,7 +230,7 @@ body {
 .code-stream::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px }
 
 .tok-react  { color: #61dafb }
-.tok-flux   { color: #a3e635 }
+.tok-aiplang   { color: #a3e635 }
 .tok-str    { color: #86efac }
 .tok-muted  { color: #334155 }
 .tok-orange { color: #fb923c }
@@ -273,10 +273,10 @@ body {
   transition: width 1.5s cubic-bezier(.4,0,.2,1);
 }
 .prog-fill.react { background: linear-gradient(90deg, #61dafb, #0ea5e9) }
-.prog-fill.flux  { background: linear-gradient(90deg, #a3e635, #65a30d) }
+.prog-fill.aiplang  { background: linear-gradient(90deg, #a3e635, #65a30d) }
 .prog-val { font-size: .7rem; font-weight: 700; width: 60px; text-align: right; flex-shrink: 0 }
 .prog-val.react { color: var(--react) }
-.prog-val.flux  { color: var(--flux) }
+.prog-val.aiplang  { color: var(--aiplang) }
 
 /* ── Result preview ── */
 .result-section {
@@ -311,7 +311,7 @@ body {
 .file-name { color: var(--text) }
 .file-size { color: var(--muted); font-size: .65rem }
 .file-js   { color: var(--react) }
-.file-flux { color: var(--flux) }
+.file-aiplang { color: var(--aiplang) }
 
 /* ── Bottom summary ── */
 .summary {
@@ -335,7 +335,7 @@ body {
   letter-spacing: .05em;
 }
 .summary-title.react { color: var(--react) }
-.summary-title.flux  { color: var(--flux) }
+.summary-title.aiplang  { color: var(--aiplang) }
 .summary-row {
   display: flex;
   justify-content: space-between;
@@ -347,7 +347,7 @@ body {
 .summary-key { color: var(--muted) }
 .summary-val { font-weight: 700 }
 .summary-val.bad  { color: var(--react) }
-.summary-val.good { color: var(--flux) }
+.summary-val.good { color: var(--aiplang) }
 .summary-val.warn { color: #fbbf24 }
 
 /* ── Controls ── */
@@ -362,7 +362,7 @@ body {
   margin: 0 auto;
 }
 .run-btn {
-  background: var(--flux);
+  background: var(--aiplang);
   color: #000;
   border: none;
   padding: .75rem 2rem;
@@ -407,7 +407,7 @@ body {
   font-family: var(--display);
   font-size: 2.5rem;
   font-weight: 900;
-  color: var(--flux);
+  color: var(--aiplang);
   letter-spacing: -.05em;
   line-height: 1;
   flex-shrink: 0;
@@ -419,7 +419,7 @@ body {
 <body>
 
 <div class="header">
-  <h1>Normal Claude vs <em>FLUX Project</em></h1>
+  <h1>Normal Claude vs <em>aiplang</em></h1>
   <p>Same request · Same Claude · Different speed</p>
 </div>
 
@@ -480,11 +480,11 @@ body {
     </div>
   </div>
 
-  <!-- RIGHT: FLUX Project -->
+  <!-- RIGHT: aiplang -->
   <div class="panel">
-    <div class="panel-header flux-h">
-      <span class="panel-title flux">Claude + FLUX Project</span>
-      <span class="panel-badge flux">FLUX language</span>
+    <div class="panel-header aiplang-h">
+      <span class="panel-title aiplang">Claude + aiplang</span>
+      <span class="panel-badge aiplang">aiplang language</span>
     </div>
 
     <div class="metrics-bar">
@@ -494,32 +494,32 @@ body {
       <div class="metric"><div class="metric-val good" id="f-files">—</div><div class="metric-lbl">arquivo</div></div>
     </div>
 
-    <div class="terminal" id="flux-terminal">
-      <div class="terminal-label">Conversa com Claude + FLUX Project</div>
+    <div class="terminal" id="aiplang-terminal">
+      <div class="terminal-label">Conversa com Claude + aiplang</div>
     </div>
 
     <div class="progress-section">
       <div class="progress-label">Performance no browser</div>
       <div class="prog-row">
         <span class="prog-name">JS baixado</span>
-        <div class="prog-track"><div class="prog-fill flux" id="pf-js"></div></div>
-        <span class="prog-val flux" id="pvf-js">10KB</span>
+        <div class="prog-track"><div class="prog-fill aiplang" id="pf-js"></div></div>
+        <span class="prog-val aiplang" id="pvf-js">10KB</span>
       </div>
       <div class="prog-row">
         <span class="prog-name">Primeiro paint</span>
-        <div class="prog-track"><div class="prog-fill flux" id="pf-fcp"></div></div>
-        <span class="prog-val flux" id="pvf-fcp">40ms</span>
+        <div class="prog-track"><div class="prog-fill aiplang" id="pf-fcp"></div></div>
+        <span class="prog-val aiplang" id="pvf-fcp">40ms</span>
       </div>
       <div class="prog-row">
         <span class="prog-name">SEO</span>
-        <div class="prog-track"><div class="prog-fill flux" id="pf-seo"></div></div>
-        <span class="prog-val flux" id="pvf-seo">✓ full</span>
+        <div class="prog-track"><div class="prog-fill aiplang" id="pf-seo"></div></div>
+        <span class="prog-val aiplang" id="pvf-seo">✓ full</span>
       </div>
     </div>
 
     <div class="result-section">
       <div class="result-label">Arquivos gerados</div>
-      <div class="result-files" id="flux-files"></div>
+      <div class="result-files" id="aiplang-files"></div>
     </div>
   </div>
 </div>
@@ -531,8 +531,8 @@ body {
     <div id="react-summary"></div>
   </div>
   <div class="summary-panel">
-    <div class="summary-title flux">FLUX — custo total</div>
-    <div id="flux-summary"></div>
+    <div class="summary-title aiplang">aiplang — custo total</div>
+    <div id="aiplang-summary"></div>
   </div>
 </div>
 
@@ -608,35 +608,35 @@ const SCENARIOS = {
         ['}', 'tok-white'],
       ]
     },
-    flux: {
+    aiplang: {
       tokens: 442, lines: 38, timeSec: 0.4, files: 1,
       jsKB: 10, fcpMs: 40, seo: true,
       fileList: [
-        { name: 'app.flux', size: '1.1KB', cls: 'file-flux' },
+        { name: 'app.flux', size: '1.1KB', cls: 'file-aiplang' },
       ],
       codeLines: [
-        ['%dashboard dark /dashboard', 'tok-flux'],
+        ['%dashboard dark /dashboard', 'tok-aiplang'],
         ['', ''],
-        ['@users = []', 'tok-flux'],
-        ['@stats = {}', 'tok-flux'],
-        ['~mount GET /api/users => @users', 'tok-flux'],
-        ['~mount GET /api/stats => @stats', 'tok-flux'],
-        ['~interval 10000 GET /api/stats => @stats', 'tok-flux'],
+        ['@users = []', 'tok-aiplang'],
+        ['@stats = {}', 'tok-aiplang'],
+        ['~mount GET /api/users => @users', 'tok-aiplang'],
+        ['~mount GET /api/stats => @stats', 'tok-aiplang'],
+        ['~interval 10000 GET /api/stats => @stats', 'tok-aiplang'],
         ['', ''],
-        ['nav{AppName>/logout:Sign out}', 'tok-flux'],
-        ['stats{@stats.users:Users|@stats.mrr:MRR|@stats.retention:Retention}', 'tok-flux'],
-        ['sect{User database}', 'tok-flux'],
-        ['table @users {', 'tok-flux'],
+        ['nav{AppName>/logout:Sign out}', 'tok-aiplang'],
+        ['stats{@stats.users:Users|@stats.mrr:MRR|@stats.retention:Retention}', 'tok-aiplang'],
+        ['sect{User database}', 'tok-aiplang'],
+        ['table @users {', 'tok-aiplang'],
         ['  Name:name | Email:email | Plan:plan | Status:status | MRR:mrr', 'tok-str'],
         ['  empty: No users yet.', 'tok-muted'],
-        ['}', 'tok-flux'],
-        ['sect{Add user}', 'tok-flux'],
-        ['form POST /api/users => @users.push($result) {', 'tok-flux'],
+        ['}', 'tok-aiplang'],
+        ['sect{Add user}', 'tok-aiplang'],
+        ['form POST /api/users => @users.push($result) {', 'tok-aiplang'],
         ['  Full name : text : Alice Johnson', 'tok-str'],
         ['  Email : email : alice@company.com', 'tok-str'],
         ['  Plan : select : starter,pro,enterprise', 'tok-str'],
-        ['}', 'tok-flux'],
-        ['foot{AppName Dashboard © 2025}', 'tok-flux'],
+        ['}', 'tok-aiplang'],
+        ['foot{AppName Dashboard © 2025}', 'tok-aiplang'],
         ['', ''],
         ['# Done. ✓', 'tok-muted'],
       ]
@@ -677,23 +677,23 @@ const SCENARIOS = {
         ['        ... (100 more lines)', 'tok-muted'],
       ]
     },
-    flux: {
+    aiplang: {
       tokens: 210, lines: 9, timeSec: 0.2, files: 1,
       jsKB: 10, fcpMs: 20, seo: true,
       fileList: [
-        { name: 'home.flux', size: '0.5KB', cls: 'file-flux' },
+        { name: 'home.flux', size: '0.5KB', cls: 'file-aiplang' },
       ],
       codeLines: [
-        ['%home dark /', 'tok-flux'],
+        ['%home dark /', 'tok-aiplang'],
         ['', ''],
-        ['@stats = {}', 'tok-flux'],
-        ['~mount GET /api/stats => @stats', 'tok-flux'],
+        ['@stats = {}', 'tok-aiplang'],
+        ['~mount GET /api/stats => @stats', 'tok-aiplang'],
         ['', ''],
-        ['nav{AppName>/pricing:Pricing>/login:Sign in}', 'tok-flux'],
-        ['hero{Ship faster with AI|Zero config, infinite scale.>/signup:Start free}', 'tok-flux'],
-        ['stats{@stats.users:Users|@stats.mrr:MRR|@stats.uptime:Uptime}', 'tok-flux'],
-        ['row3{rocket>Deploy>3 seconds from push.|shield>Enterprise>SOC2, GDPR.|chart>Observability>Real-time.}', 'tok-flux'],
-        ['foot{© 2025 AppName>/privacy:Privacy>/terms:Terms}', 'tok-flux'],
+        ['nav{AppName>/pricing:Pricing>/login:Sign in}', 'tok-aiplang'],
+        ['hero{Ship faster with AI|Zero config, infinite scale.>/signup:Start free}', 'tok-aiplang'],
+        ['stats{@stats.users:Users|@stats.mrr:MRR|@stats.uptime:Uptime}', 'tok-aiplang'],
+        ['row3{rocket>Deploy>3 seconds from push.|shield>Enterprise>SOC2, GDPR.|chart>Observability>Real-time.}', 'tok-aiplang'],
+        ['foot{© 2025 AppName>/privacy:Privacy>/terms:Terms}', 'tok-aiplang'],
         ['', ''],
         ['# Done. ✓', 'tok-muted'],
       ]
@@ -728,31 +728,31 @@ const SCENARIOS = {
         ['  ... (170 more lines)', 'tok-muted'],
       ]
     },
-    flux: {
+    aiplang: {
       tokens: 320, lines: 18, timeSec: 0.3, files: 1,
       jsKB: 10, fcpMs: 35, seo: true,
       fileList: [
-        { name: 'users.flux', size: '0.8KB', cls: 'file-flux' },
+        { name: 'users.flux', size: '0.8KB', cls: 'file-aiplang' },
       ],
       codeLines: [
-        ['%users dark /users', 'tok-flux'],
+        ['%users dark /users', 'tok-aiplang'],
         ['', ''],
-        ['@users = []', 'tok-flux'],
-        ['~mount GET /api/users => @users', 'tok-flux'],
+        ['@users = []', 'tok-aiplang'],
+        ['~mount GET /api/users => @users', 'tok-aiplang'],
         ['', ''],
-        ['nav{AppName>/users:Users>/settings:Settings}', 'tok-flux'],
-        ['sect{User Management}', 'tok-flux'],
-        ['table @users {', 'tok-flux'],
+        ['nav{AppName>/users:Users>/settings:Settings}', 'tok-aiplang'],
+        ['sect{User Management}', 'tok-aiplang'],
+        ['table @users {', 'tok-aiplang'],
         ['  Name:name | Email:email | Plan:plan | Status:status | MRR:mrr', 'tok-str'],
         ['  empty: No users yet.', 'tok-muted'],
-        ['}', 'tok-flux'],
-        ['sect{Create User}', 'tok-flux'],
-        ['form POST /api/users => @users.push($result) {', 'tok-flux'],
+        ['}', 'tok-aiplang'],
+        ['sect{Create User}', 'tok-aiplang'],
+        ['form POST /api/users => @users.push($result) {', 'tok-aiplang'],
         ['  Full name : text : Alice Johnson', 'tok-str'],
         ['  Email : email : alice@company.com', 'tok-str'],
         ['  Plan : select : starter,pro,enterprise', 'tok-str'],
-        ['}', 'tok-flux'],
-        ['foot{© 2025 AppName}', 'tok-flux'],
+        ['}', 'tok-aiplang'],
+        ['foot{© 2025 AppName}', 'tok-aiplang'],
         ['# Done. ✓', 'tok-muted'],
       ]
     }
@@ -793,22 +793,22 @@ const SCENARIOS = {
         ['  ... (80 more lines of JSX)', 'tok-muted'],
       ]
     },
-    flux: {
+    aiplang: {
       tokens: 140, lines: 8, timeSec: 0.1, files: 1,
       jsKB: 10, fcpMs: 20, seo: true,
       fileList: [
-        { name: 'login.flux', size: '0.3KB', cls: 'file-flux' },
+        { name: 'login.flux', size: '0.3KB', cls: 'file-aiplang' },
       ],
       codeLines: [
-        ['%login dark /login', 'tok-flux'],
+        ['%login dark /login', 'tok-aiplang'],
         ['', ''],
-        ['nav{AppName}', 'tok-flux'],
-        ['hero{Welcome back|Sign in to continue.}', 'tok-flux'],
-        ['form POST /api/auth/login => redirect /dashboard {', 'tok-flux'],
+        ['nav{AppName}', 'tok-aiplang'],
+        ['hero{Welcome back|Sign in to continue.}', 'tok-aiplang'],
+        ['form POST /api/auth/login => redirect /dashboard {', 'tok-aiplang'],
         ['  Email : email : you@company.com', 'tok-str'],
         ['  Password : password :', 'tok-str'],
-        ['}', 'tok-flux'],
-        ['foot{© 2025 AppName}', 'tok-flux'],
+        ['}', 'tok-aiplang'],
+        ['foot{© 2025 AppName}', 'tok-aiplang'],
         ['# Done. ✓', 'tok-muted'],
       ]
     }
@@ -870,7 +870,7 @@ async function streamCode(termId, lines, color, delayPerLine) {
   const code = document.createElement('div')
   code.className = 'code-stream'
   const cursor = document.createElement('span')
-  cursor.className = 'stream-cursor ' + (color.includes('react') ? 'tok-react' : 'tok-flux')
+  cursor.className = 'stream-cursor ' + (color.includes('react') ? 'tok-react' : 'tok-aiplang')
   bub.appendChild(code)
   msg.appendChild(av)
   msg.appendChild(bub)
@@ -928,9 +928,9 @@ async function runComparison() {
 
   // Reset
   document.getElementById('react-terminal').innerHTML = '<div class="terminal-label">Conversa com Claude</div>'
-  document.getElementById('flux-terminal').innerHTML  = '<div class="terminal-label">Conversa com Claude + FLUX Project</div>'
+  document.getElementById('aiplang-terminal').innerHTML  = '<div class="terminal-label">Conversa com Claude + aiplang</div>'
   document.getElementById('react-files').innerHTML = ''
-  document.getElementById('flux-files').innerHTML  = ''
+  document.getElementById('aiplang-files').innerHTML  = ''
   ;['r-tokens','r-lines','r-time','r-files','f-tokens','f-lines','f-time','f-files'].forEach(id => {
     document.getElementById(id).textContent = '—'
   })
@@ -938,17 +938,17 @@ async function runComparison() {
     document.getElementById(id).style.width = '0'
   })
   document.getElementById('react-summary').innerHTML = ''
-  document.getElementById('flux-summary').innerHTML  = ''
+  document.getElementById('aiplang-summary').innerHTML  = ''
 
   // User message (both panels simultaneously)
   addMsg('react-terminal', 'user', sc.request, 'react-bubble')
-  addMsg('flux-terminal',  'user', sc.request, 'flux-bubble')
+  addMsg('aiplang-terminal',  'user', sc.request, 'aiplang-bubble')
 
   await sleep(600)
 
   // Typing indicators
   addTyping('react-terminal', 'react-bubble')
-  addTyping('flux-terminal',  'flux-bubble')
+  addTyping('aiplang-terminal',  'aiplang-bubble')
 
   // React: thinking delay (longer)
   await sleep(1400)
@@ -956,25 +956,25 @@ async function runComparison() {
   addMsg('react-terminal', 'claude', 'Aqui está o componente React com TypeScript e Tailwind:', 'react-bubble')
   await sleep(200)
 
-  // FLUX: thinking delay (shorter — already has context)
+  // aiplang: thinking delay (shorter — already has context)
   await sleep(400)
-  removeTyping('flux-terminal')
+  removeTyping('aiplang-terminal')
   await sleep(200)
 
   // Stream both simultaneously
   const msPerLineReact = Math.round(sc.react.timeSec * 1000 / sc.react.lines)
-  const msPerLineFlux  = Math.round(sc.flux.timeSec  * 1000 / sc.flux.lines)
+  const msPerLineAiplang  = Math.round(sc.aiplang.timeSec  * 1000 / sc.aiplang.lines)
 
   const reactStream = streamCode('react-terminal', sc.react.codeLines, 'react-bubble', msPerLineReact)
-  const fluxStream  = streamCode('flux-terminal',  sc.flux.codeLines,  'flux-bubble',  msPerLineFlux)
+  const aiplangStream  = streamCode('aiplang-terminal',  sc.aiplang.codeLines,  'aiplang-bubble',  msPerLineAiplang)
 
   // Update metrics as streaming happens
   setTimeout(() => {
-    document.getElementById('f-tokens').textContent = sc.flux.tokens
-    document.getElementById('f-lines').textContent  = sc.flux.lines
-    document.getElementById('f-time').textContent   = sc.flux.timeSec + 's'
-    document.getElementById('f-files').textContent  = sc.flux.files
-  }, sc.flux.timeSec * 1000 + 200)
+    document.getElementById('f-tokens').textContent = sc.aiplang.tokens
+    document.getElementById('f-lines').textContent  = sc.aiplang.lines
+    document.getElementById('f-time').textContent   = sc.aiplang.timeSec + 's'
+    document.getElementById('f-files').textContent  = sc.aiplang.files
+  }, sc.aiplang.timeSec * 1000 + 200)
 
   setTimeout(() => {
     document.getElementById('r-tokens').textContent = sc.react.tokens.toLocaleString()
@@ -983,11 +983,11 @@ async function runComparison() {
     document.getElementById('r-files').textContent  = sc.react.files + '+'
   }, sc.react.timeSec * 1000 + 200)
 
-  await Promise.all([reactStream, fluxStream])
+  await Promise.all([reactStream, aiplangStream])
 
   // Show files
   showFiles('react-files', sc.react.fileList, 100)
-  showFiles('flux-files',  sc.flux.fileList,  100)
+  showFiles('aiplang-files',  sc.aiplang.fileList,  100)
 
   await sleep(600)
 
@@ -996,14 +996,14 @@ async function runComparison() {
   animateProgress('pr-js',  100, 200)
   animateProgress('pr-fcp', 100, 300)
   animateProgress('pr-seo', sc.react.seo ? 100 : 8, 400)
-  animateProgress('pf-js',  (sc.flux.jsKB / maxJS)  * 100, 200)
-  animateProgress('pf-fcp', (sc.flux.fcpMs / maxFCP) * 100, 300)
+  animateProgress('pf-js',  (sc.aiplang.jsKB / maxJS)  * 100, 200)
+  animateProgress('pf-fcp', (sc.aiplang.fcpMs / maxFCP) * 100, 300)
   animateProgress('pf-seo', 100, 400)
 
   await sleep(800)
 
   // Summary tables
-  const tokenRatio = Math.round(sc.react.tokens / sc.flux.tokens)
+  const tokenRatio = Math.round(sc.react.tokens / sc.aiplang.tokens)
   setSummary('react-summary', [
     ['Tokens gerados',  sc.react.tokens.toLocaleString(), 'bad'],
     ['Linhas de código', sc.react.lines, 'bad'],
@@ -1014,13 +1014,13 @@ async function runComparison() {
     ['SEO',             sc.react.seo ? 'Sim' : 'Não', sc.react.seo ? 'good' : 'warn'],
     ['Config files',    'Sim (4)', 'warn'],
   ])
-  setSummary('flux-summary', [
-    ['Tokens gerados',  sc.flux.tokens, 'good'],
-    ['Linhas de código', sc.flux.lines, 'good'],
-    ['Tempo de geração', sc.flux.timeSec + 's', 'good'],
-    ['Arquivos criados', sc.flux.files, 'good'],
-    ['JS no browser',   sc.flux.jsKB + 'KB', 'good'],
-    ['First paint',     sc.flux.fcpMs + 'ms', 'good'],
+  setSummary('aiplang-summary', [
+    ['Tokens gerados',  sc.aiplang.tokens, 'good'],
+    ['Linhas de código', sc.aiplang.lines, 'good'],
+    ['Tempo de geração', sc.aiplang.timeSec + 's', 'good'],
+    ['Arquivos criados', sc.aiplang.files, 'good'],
+    ['JS no browser',   sc.aiplang.jsKB + 'KB', 'good'],
+    ['First paint',     sc.aiplang.fcpMs + 'ms', 'good'],
     ['SEO',             'Sim (SSG)', 'good'],
     ['Config files',    'Nenhum', 'good'],
   ])
@@ -1030,12 +1030,12 @@ async function runComparison() {
   const verdict = document.getElementById('verdict')
   document.getElementById('verdict-num').textContent = tokenRatio + '×'
   document.getElementById('verdict-text').innerHTML = `
-    <b>FLUX é ${tokenRatio}× mais rápido para Claude gerar</b> esse app.<br>
-    ${sc.react.tokens.toLocaleString()} tokens vs ${sc.flux.tokens} tokens —
-    ${sc.react.timeSec}s vs ${sc.flux.timeSec}s de geração.<br>
-    No browser: ${sc.react.fcpMs}ms first paint vs ${sc.flux.fcpMs}ms.
-    JS baixado: ${sc.react.jsKB}KB vs ${sc.flux.jsKB}KB.
-    SEO: ${sc.react.seo ? 'ambos' : 'só FLUX'}.
+    <b>aiplang é ${tokenRatio}× mais rápido para Claude gerar</b> esse app.<br>
+    ${sc.react.tokens.toLocaleString()} tokens vs ${sc.aiplang.tokens} tokens —
+    ${sc.react.timeSec}s vs ${sc.aiplang.timeSec}s de geração.<br>
+    No browser: ${sc.react.fcpMs}ms first paint vs ${sc.aiplang.fcpMs}ms.
+    JS baixado: ${sc.react.jsKB}KB vs ${sc.aiplang.jsKB}KB.
+    SEO: ${sc.react.seo ? 'ambos' : 'só aiplang'}.
   `
   verdict.style.display = 'flex'
 

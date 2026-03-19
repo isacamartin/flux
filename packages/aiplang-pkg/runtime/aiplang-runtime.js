@@ -456,7 +456,7 @@ class Renderer {
 
   render(page) {
     this.container.innerHTML = ''
-    this.container.className = `flux-root flux-theme-${page.theme}`
+    this.container.className = `aiplang-root aiplang-theme-${page.theme}`
     for (const block of page.blocks) {
       const el = this.renderBlock(block)
       if (el) this.container.appendChild(el)
@@ -1069,9 +1069,9 @@ input,button,select{font-family:inherit}
 
 function boot(src, container) {
   // Inject CSS once
-  if (!document.getElementById('flux-css')) {
+  if (!document.getElementById('aiplang-css')) {
     const style = document.createElement('style')
-    style.id = 'flux-css'
+    style.id = 'aiplang-css'
     style.textContent = CSS
     document.head.appendChild(style)
   }
@@ -1089,9 +1089,9 @@ return { boot, parseFlux, State, Renderer, Router, QueryEngine }
 
 })()
 
-// Auto-boot from <script type="text/flux">
+// Auto-boot from <script type="text/aiplang">
 document.addEventListener('DOMContentLoaded', () => {
-  const script = document.querySelector('script[type="text/flux"]')
+  const script = document.querySelector('script[type="text/aiplang"]')
   if (script) {
     const targetSel = script.getAttribute('target') || '#app'
     const container = document.querySelector(targetSel)
