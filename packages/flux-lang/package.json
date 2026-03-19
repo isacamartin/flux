@@ -1,6 +1,6 @@
 {
   "name": "aiplang",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI-first web language. Describe an app to Claude, get it running in seconds.",
   "keywords": [
     "flux",
