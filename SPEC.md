@@ -1,8 +1,8 @@
-# FLUX Language Specification v1.0
+# aiplang Language Specification v1.0
 
 ## Philosophy
 
-FLUX is a machine-to-machine web language.
+aiplang is a machine-to-machine web language.
 - Written by AI, executed by browser
 - Full SPA capabilities: state, routing, data fetching, forms
 - Competes with React/Next in features, not in readability
@@ -260,7 +260,7 @@ foot{© 2025 AppName}
 
 ## Output
 
-FLUX compiles to:
+aiplang compiles to:
 - Single HTML file with inlined runtime (~28KB gzip ~9KB)
 - Zero external dependencies
 - Full SPA with client-side routing

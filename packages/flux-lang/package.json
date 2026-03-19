@@ -1,6 +1,6 @@
 {
-  "name": "flux-web",
-  "version": "1.3.1",
+  "name": "aiplang",
+  "version": "1.0.0",
   "description": "AI-first web language. Describe an app to Claude, get it running in seconds.",
   "keywords": [
     "flux",
@@ -16,17 +16,16 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/isacamartin/flux.git"
+    "url": "https://github.com/isacamartin/aiplang.git"
   },
-  "homepage": "https://isacamartin.github.io/flux",
+  "homepage": "https://aiplang.io",
   "bugs": {
-    "url": "https://github.com/isacamartin/flux/issues"
+    "url": "https://github.com/isacamartin/aiplang/issues"
   },
   "bin": {
-    "flux-web": "./bin/flux.js",
-    "flux": "./bin/flux.js"
+    "aiplang": "./bin/aiplang.js"
   },
-  "main": "./runtime/flux-runtime.js",
+  "main": "./runtime/aiplang-runtime.js",
   "files": [
     "bin/",
     "runtime/",

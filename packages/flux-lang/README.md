@@ -1,10 +1,10 @@
-# flux-web
+# aiplang
 
 > AI-first web language. Describe an app to Claude, get it running in seconds.
 
 ```bash
-npx flux-web init my-app
-cd my-app && npx flux-web serve
+npx aiplang init my-app
+cd my-app && npx aiplang serve
 ```
 
 ---
@@ -32,7 +32,7 @@ form POST /api/users => @users.push($result) { Full name:text:Alice | Email:emai
 foot{© 2025 MyApp}
 ```
 
-**You paste it, run `npx flux-web serve` → working dashboard.**
+**You paste it, run `npx aiplang serve` → working dashboard.**
 
 That's it. No TypeScript, no JSX, no config files, no node_modules drama.
 
@@ -61,7 +61,7 @@ In FLUX: **442 tokens. 1 file. 10× faster.**
 
 **Option 2 — Paste in any conversation:**
 ```
-I'm using FLUX web language. Syntax:
+I'm using aiplang language. Syntax:
 %id theme /route | @var=[] | ~mount GET /api => @var | ~interval 10000 GET /api => @var
 ~theme accent=#hex radius=1rem font=Name bg=#hex text=#hex surface=#hex
 nav{Brand>/path:Link} | hero{Title|Sub>/path:CTA} animate:fade-up
@@ -82,13 +82,13 @@ Generate: [your request here]
 ## Commands
 
 ```bash
-npx flux-web init my-app                    # create project
-npx flux-web init --template saas           # SaaS starter
-npx flux-web init --template landing        # landing page
-npx flux-web init --template crud           # CRUD app
-npx flux-web serve                          # dev server + hot reload → localhost:3000
-npx flux-web build pages/ --out dist/       # compile → static HTML
-npx flux-web new dashboard                  # new page template
+npx aiplang init my-app                    # create project
+npx aiplang init --template saas           # SaaS starter
+npx aiplang init --template landing        # landing page
+npx aiplang init --template crud           # CRUD app
+npx aiplang serve                          # dev server + hot reload → localhost:3000
+npx aiplang build pages/ --out dist/       # compile → static HTML
+npx aiplang new dashboard                  # new page template
 ```
 
 ---
@@ -165,10 +165,10 @@ form POST /api/auth/login => redirect /dashboard { ... }
 
 ```
 pages/home.flux
-  ↓ npx flux-web build
+  ↓ npx aiplang build
 dist/
   index.html          ← pre-rendered HTML, SEO-ready
-  flux-hydrate.js     ← 10KB, only loaded on dynamic pages
+  aiplang-hydrate.js     ← 10KB, only loaded on dynamic pages
 ```
 
 Zero framework. Zero node_modules in production. Deploys to any static host.
@@ -178,7 +178,7 @@ Zero framework. Zero node_modules in production. Deploys to any static host.
 ## Deploy
 
 ```bash
-npx flux-web build pages/ --out dist/
+npx aiplang build pages/ --out dist/
 
 # Vercel
 npx vercel dist/
@@ -208,7 +208,7 @@ FLUX pre-renders HTML server-side at build time. The browser gets a complete pag
 
 ## GitHub
 
-[github.com/isacamartin/flux](https://github.com/isacamartin/flux)
+[github.com/isacamartin/aiplang](https://github.com/isacamartin/aiplang)
 
 ## License
 

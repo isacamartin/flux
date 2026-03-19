@@ -5,9 +5,9 @@
 ## Quick start
 
 ```bash
-npx flux-web init my-app
+npx aiplang init my-app
 cd my-app
-npx flux-web serve
+npx aiplang serve
 ```
 
 Ask Claude to generate a page → paste into `pages/home.flux` → see it live.
@@ -15,10 +15,10 @@ Ask Claude to generate a page → paste into `pages/home.flux` → see it live.
 ## npm package
 
 ```bash
-npm install -g flux-web
+npm install -g aiplang
 ```
 
-→ [npmjs.com/package/flux-web](https://npmjs.com/package/flux-web)
+→ [npmjs.com/package/aiplang](https://npmjs.com/package/aiplang)
 
 ## For Claude
 
@@ -26,7 +26,7 @@ Upload `FLUX-PROJECT-KNOWLEDGE.md` to a Claude Project to make Claude generate F
 
 ## Docs
 
-See [packages/flux-lang/README.md](packages/flux-lang/README.md) for full language reference.
+See [packages/aiplang/README.md](packages/aiplang/README.md) for full language reference.
 
 ## Performance
 

@@ -226,9 +226,9 @@ foot{© 2025 Acme Studio>/privacy:Privacy>/instagram:Instagram>/linkedin:LinkedI
 
 ```bash
 # Install once
-npm install -g flux-web
+npm install -g aiplang
 
 # Save Claude's output as pages/app.flux, then:
-flux-web serve        # dev server → http://localhost:3000
-flux-web build pages/ # compile → dist/
+aiplang serve        # dev server → http://localhost:3000
+aiplang build pages/ # compile → dist/
 ```
