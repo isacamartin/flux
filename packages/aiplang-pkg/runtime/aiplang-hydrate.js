@@ -77,7 +77,27 @@ function applyAction(data, target, action) {
     const pm = action.match(/^@([a-zA-Z_]+)\.push\(\$result\)$/)
     if (pm) { set(pm[1], [...(get(pm[1]) || []), data]); return }
     const fm = action.match(/^@([a-zA-Z_]+)\.filter\((.+)\)$/)
-    if (fm) { try { set(fm[1], (get(fm[1])||[]).filter(new Function('item', `return (${fm[2]})(item)`))) } catch {} return }
+    if (fm) {
+      // Safe filter: @list.filter(item.status=active) style — no eval/new Function
+      try {
+        const expr = fm[2].trim()
+        const filtered = (get(fm[1]) || []).filter(item => {
+          // Support simple: field=value or field!=value
+          const eq = expr.match(/^([a-zA-Z_.]+)\s*(!?=)\s*(.+)$/)
+          if (eq) {
+            const [, field, op, val] = eq
+            const parts = field.split('.')
+            let v = item
+            for (const p of parts) v = v?.[p]
+            const strV = String(v ?? '')
+            return op === '!=' ? strV !== val.trim() : strV === val.trim()
+          }
+          return true
+        })
+        set(fm[1], filtered)
+      } catch {}
+      return
+    }
     const am = action.match(/^@([a-zA-Z_]+)\s*=\s*\$result$/)
     if (am) { set(am[1], data); return }
   }

@@ -53,6 +53,14 @@ const ic    = n => ({bolt:'⚡',rocket:'🚀',shield:'🛡',chart:'📊',star:'�
 
 // ── JWT ───────────────────────────────────────────────────────────
 let JWT_SECRET = process.env.JWT_SECRET || 'aiplang-secret-dev'
+// Warn loudly if using dev secret in what looks like production
+if (!process.env.JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[aiplang] FATAL: JWT_SECRET not set in production. Set JWT_SECRET env var.')
+    process.exit(1)
+  }
+  console.warn('[aiplang] WARNING: JWT_SECRET not set. Using insecure dev default. Set JWT_SECRET in .env')
+}
 let JWT_EXPIRE = '7d'
 const generateJWT = (user) => jwt.sign({ id: user.id, email: user.email, role: user.role || 'user' }, JWT_SECRET, { expiresIn: JWT_EXPIRE })
 const verifyJWT   = (token) => { try { return jwt.verify(token, JWT_SECRET) } catch { return null } }
@@ -638,7 +646,7 @@ function resolveVar(expr, ctx) {
 }
 function evalMath(expr,ctx){try{const r=expr.replace(/\$[\w.]+/g,m=>resolveVar(m,ctx)||0);return Function('"use strict";return('+r+')')()}catch{return 0}}
 function sanitize(o){if(!o)return o;const s={...o};delete s.password;return s}
-function resolveEnv(v){if(!v)return v;if(v.startsWith('$'))return process.env[v.slice(1)]||v;return v}
+function resolveEnv(v){if(!v)return v;if(v.startsWith('$'))return process.env[v.slice(1)]||null;return v}
 
 // ═══════════════════════════════════════════════════════════════════
 // AUTO ADMIN PANEL
@@ -744,9 +752,14 @@ td{padding:.875rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.04);color:#
 </div>
 <script>
 const prefix = '${prefix}'
-const token = localStorage.getItem('admin_token') || ''
+// API calls use credentials:include — HttpOnly cookie is sent automatically
 async function api(method, path, body) {
-  const r = await fetch(prefix + '/api' + path, {method, headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:body?JSON.stringify(body):undefined})
+  const r = await fetch(prefix + '/api' + path, {
+    method,
+    headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: body ? JSON.stringify(body) : undefined
+  })
   return r.json()
 }
 async function loadModel(name, page=1) {
@@ -782,9 +795,9 @@ function renderAdminLogin(prefix) {
 <button onclick="login()">Sign in</button></div>
 <script>
 async function login(){
-  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('email').value,password:document.getElementById('pass').value})})
+  const r=await fetch('${prefix}/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('email').value,password:document.getElementById('pass').value}),credentials:'same-origin'})
   const d=await r.json()
-  if(d.token){localStorage.setItem('admin_token',d.token);location.href='${prefix}'}
+  if(d.ok){location.href='${prefix}'}
   else document.getElementById('err').textContent=d.error||'Invalid credentials'
 }
 document.addEventListener('keydown',e=>{if(e.key==='Enter')login()})
@@ -804,8 +817,14 @@ class AiplangServer {
 
     // Multipart — don't pre-parse, let S3 upload handler do it
     const isMultipart = (req.headers['content-type'] || '').includes('multipart/form-data')
-    if (req.method !== 'GET' && req.method !== 'DELETE' && !isMultipart) req.body = await parseBody(req)
-    else if (!isMultipart) req.body = {}
+    const hasJsonCT = (req.headers['content-type'] || '').includes('application/json')
+    if (req.method !== 'GET' && req.method !== 'DELETE' && !isMultipart) {
+      req.body = await parseBody(req)
+      if (req.body.__tooBig) {
+        res.writeHead(413, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Request body too large' })); return
+      }
+    } else if (!isMultipart) req.body = {}
 
     const parsed = url.parse(req.url, true)
     req.query = parsed.query; req.path = parsed.pathname
@@ -825,6 +844,11 @@ class AiplangServer {
     // CORS — use plugin config if set, otherwise allow all
     const origins = this._corsOrigins || ['*']
     const origin = req.headers['origin'] || ''
+    // Warn once if using wildcard CORS in production
+    if (origins.includes('*') && process.env.NODE_ENV === 'production' && !this._corsWarned) {
+      this._corsWarned = true
+      console.warn('[aiplang] WARNING: CORS is set to * (allow all origins). Use ~use cors origins=https://yourdomain.com in production')
+    }
     const allowOrigin = origins.includes('*') ? '*' : (origins.includes(origin) ? origin : origins[0])
     res.setHeader('Access-Control-Allow-Origin', allowOrigin)
     res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,PATCH,DELETE,OPTIONS')
@@ -864,9 +888,35 @@ function matchRoute(pattern, reqPath) {
   for(let i=0;i<pp.length;i++){if(pp[i].startsWith(':'))params[pp[i].slice(1)]=rp[i];else if(pp[i]!==rp[i])return null}
   return params
 }
-function extractToken(req) { const a=req.headers.authorization; return a?.startsWith('Bearer ')?a.slice(7):null }
+function extractToken(req) {
+  // 1. Bearer token from Authorization header
+  const a = req.headers.authorization
+  if (a?.startsWith('Bearer ')) return a.slice(7)
+  // 2. HttpOnly cookie (admin panel)
+  const cookies = req.headers['cookie'] || ''
+  const adminCookie = cookies.split(';').map(s=>s.trim()).find(s=>s.startsWith('aiplang_admin='))
+  if (adminCookie) return adminCookie.slice('aiplang_admin='.length)
+  return null
+}
+const MAX_BODY_BYTES = parseInt(process.env.MAX_BODY_BYTES || '1048576') // 1MB default
 async function parseBody(req) {
-  return new Promise(r=>{let d='';req.on('data',c=>d+=c);req.on('end',()=>{try{r(JSON.parse(d))}catch{r({})}});req.on('error',()=>r({}))})
+  return new Promise((resolve) => {
+    const chunks = []
+    let size = 0, done = false
+    req.on('data', chunk => {
+      if (done) return
+      size += chunk.length
+      if (size > MAX_BODY_BYTES) { done = true; resolve({ __tooBig: true }); return }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      if (done) return
+      done = true
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString())) }
+      catch { resolve({}) }
+    })
+    req.on('error', () => { if (!done) { done = true; resolve({}) } })
+  })
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -954,7 +1004,7 @@ function setupS3(config) {
     endpoint: config.endpoint ? resolveEnv(config.endpoint) : null,
   }
 
-  const isMock = !S3_CONFIG.key || S3_CONFIG.key.startsWith('$') || S3_CONFIG.key.includes('mock')
+  const isMock = !S3_CONFIG.key || S3_CONFIG.key === null || S3_CONFIG.key.startsWith('$') || S3_CONFIG.key.includes('mock')
   if (isMock) {
     console.log('[aiplang] S3: mock mode (set AWS_ACCESS_KEY_ID for real storage)')
     S3_CLIENT = null
@@ -1289,6 +1339,19 @@ async function startServer(aipFile, port = 3000) {
   const app = parseApp(src)
   const srv = new AiplangServer()
 
+  // Validate required env vars up front
+  const missingEnvs = []
+  for (const envDef of app.env) {
+    if (envDef.required && !process.env[envDef.name]) {
+      missingEnvs.push(envDef.name)
+    }
+  }
+  if (missingEnvs.length) {
+    console.error(`[aiplang] FATAL: Missing required env vars: ${missingEnvs.join(', ')}`)
+    console.error('[aiplang] Set them in .env or export them before starting')
+    process.exit(1)
+  }
+
   // Auth setup
   if (app.auth) {
     JWT_SECRET = resolveEnv(app.auth.secret) || JWT_SECRET
@@ -1372,7 +1435,7 @@ async function startServer(aipFile, port = 3000) {
 
   // Health
   srv.addRoute('GET', '/health', (req, res) => res.json(200, {
-    status:'ok', version:'2.5.0',
+    status:'ok', version:'2.6.0',
     models: app.models.map(m=>m.name),
     routes: app.apis.length, pages: app.pages.length,
     admin: app.admin?.prefix || null,
@@ -1415,7 +1478,7 @@ function setupStripe(config) {
   STRIPE_CONFIG = config
   const key = resolveEnv(config.key) || ''
   // Use mock if key is placeholder, test/mock value, or SDK unavailable
-  const isMock = !key || key.startsWith('$') || key === 'sk_test_mock' || key.includes('mock')
+  const isMock = !key || key === null || key.startsWith('$') || key === 'sk_test_mock' || key.includes('mock')
   if (isMock) {
     console.log('[aiplang] Stripe: mock mode (set STRIPE_SECRET_KEY for real payments)')
     STRIPE = null // will use mockStripe()

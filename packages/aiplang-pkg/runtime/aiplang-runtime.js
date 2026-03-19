@@ -100,14 +100,11 @@ class State {
   }
 
   _recompute() {
+    // Safe computed: only supports @var.path expressions, no arbitrary code
     if (!this._computedExprs) return
     for (const [name, expr] of Object.entries(this._computedExprs)) {
       try {
-        const fn = new Function(
-          ...Object.keys(this._data).map(k => '_'+k),
-          `try { return (${expr}) } catch(e) { return null }`
-        )
-        const val = fn(...Object.keys(this._data).map(k => this._data[k]))
+        const val = this.eval(expr.trim())
         if (JSON.stringify(this._computed[name]) !== JSON.stringify(val)) {
           this._computed[name] = val
           this._notify('$'+name)
