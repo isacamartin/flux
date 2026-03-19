@@ -72,6 +72,67 @@ api DELETE /api/users/:id {
 ~interval 30000 GET /api/stats => @stats
 ```
 
+### S3 Storage
+```
+~s3 $AWS_ACCESS_KEY_ID secret=$AWS_SECRET_ACCESS_KEY bucket=$S3_BUCKET region=us-east-1
+~s3 bucket=my-bucket region=us-east-1 prefix=uploads/ maxSize=5mb allow=image/jpeg,image/png,application/pdf
+
+# Cloudflare R2 compatible
+~s3 $R2_KEY secret=$R2_SECRET bucket=my-bucket endpoint=https://xxx.r2.cloudflarestorage.com
+
+# MinIO local
+~s3 $KEY secret=$SECRET bucket=local endpoint=http://localhost:9000
+```
+Auto-generated routes: `POST /api/upload` | `DELETE /api/upload/:key` | `GET /api/upload/presign?key=x`
+
+Mock mode in dev: saves to `./uploads/` folder, serves via `/uploads/filename`.
+
+### Plugin System
+```
+# Built-in plugins (no file needed)
+~use logger format=tiny
+~use cors origins=https://myapp.com,https://www.myapp.com
+~use rate-limit max=100 window=60s
+~use helmet
+~use compression
+
+# Local file plugin
+~plugin ./plugins/my-plugin.js
+
+# npm package plugin
+~plugin my-aiplang-plugin
+```
+
+Plugin interface:
+```js
+// plugins/my-plugin.js
+module.exports = {
+  name: 'my-plugin',
+  setup(server, app, utils) {
+    // server.addRoute('GET', '/api/custom', handler)
+    // utils.emit, utils.on, utils.dispatch, utils.dbRun, utils.uuid
+    // utils.s3Upload, utils.generateJWT — all available
+  }
+}
+
+// Factory with options
+module.exports = (opts) => ({
+  name: 'my-plugin',
+  setup(server, app, { opts, emit }) { ... }
+})
+```
+
+### Stripe Payments
+```
+~stripe $STRIPE_SECRET_KEY webhook=$STRIPE_WEBHOOK_SECRET success=/dashboard cancel=/pricing
+~plan starter=price_xxx pro=price_yyy enterprise=price_zzz
+```
+Auto-generated routes: `POST /api/stripe/checkout` | `POST /api/stripe/portal` | `GET /api/stripe/subscription` | `DELETE /api/stripe/subscription` | `POST /api/stripe/webhook`
+
+Webhooks handled: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.payment_succeeded`
+
+Guard: `~guard subscribed` — requires active subscription
+
 ### All blocks
 
 **nav** — `nav{Brand>/path:Link>/path:Link}` (auto mobile hamburger)

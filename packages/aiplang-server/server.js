@@ -285,7 +285,7 @@ function migrateModels(models) {
 // PARSER
 // ═══════════════════════════════════════════════════════════════════
 function parseApp(src) {
-  const app = { env:[], db:null, auth:null, mail:null, stripe:null, middleware:[], models:[], apis:[], pages:[], jobs:[], events:[], admin:null }
+  const app = { env:[], db:null, auth:null, mail:null, stripe:null, s3:null, plugins:[], middleware:[], models:[], apis:[], pages:[], jobs:[], events:[], admin:null }
   const lines = src.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'))
   let i=0, inModel=false, inAPI=false, curModel=null, curAPI=null, pageLines=[], inPage=false
 
@@ -306,6 +306,8 @@ function parseApp(src) {
     if (line.startsWith('~admin'))        { app.admin = parseAdminLine(line); i++; continue }
     if (line.startsWith('~stripe '))       { app.stripe = parseStripeLine(line.slice(8)); i++; continue }
     if (line.startsWith('~plan '))         { app.stripe = app.stripe || {}; app.stripe.plans = app.stripe.plans || {}; parsePlanLine(line.slice(6), app.stripe.plans); i++; continue }
+    if (line.startsWith('~s3 '))           { app.s3 = parseS3Line(line.slice(4)); i++; continue }
+    if (line.startsWith('~plugin ') || line.startsWith('~use ')) { app.plugins.push(parsePluginLine(line)); i++; continue }
     if (line.startsWith('~job '))         { app.jobs.push(parseJobLine(line.slice(5))); i++; continue }
     if (line.startsWith('~on '))          { app.events.push(parseEventLine(line.slice(4))); i++; continue }
 
@@ -361,6 +363,40 @@ function parsePlanLine(s, plans) {
   s.split(/\s+/).forEach(pair => {
     const eq = pair.indexOf('='); if (eq !== -1) plans[pair.slice(0,eq)] = pair.slice(eq+1)
   })
+}
+function parseS3Line(s) {
+  // ~s3 $AWS_ACCESS_KEY_ID secret=$AWS_SECRET_ACCESS_KEY bucket=$S3_BUCKET region=us-east-1
+  // ~s3 bucket=my-bucket region=eu-west-1 acl=public-read prefix=uploads/
+  const parts = s.trim().split(/\s+/)
+  const cfg = { key: null, secret: null, bucket: null, region: 'us-east-1', acl: 'private', prefix: '', maxSize: '10mb', allowedTypes: null }
+  for (const p of parts) {
+    if (p.startsWith('secret='))   cfg.secret = p.slice(7)
+    else if (p.startsWith('bucket='))  cfg.bucket = p.slice(7)
+    else if (p.startsWith('region='))  cfg.region = p.slice(7)
+    else if (p.startsWith('acl='))     cfg.acl = p.slice(4)
+    else if (p.startsWith('prefix='))  cfg.prefix = p.slice(7)
+    else if (p.startsWith('maxSize=')) cfg.maxSize = p.slice(8)
+    else if (p.startsWith('allow='))   cfg.allowedTypes = p.slice(6).split(',')
+    else if (p.startsWith('endpoint='))cfg.endpoint = p.slice(9)  // custom endpoint (R2, MinIO, etc)
+    else if (p && !p.includes('='))    cfg.key = p  // first bare token = access key
+  }
+  return cfg
+}
+function parsePluginLine(s) {
+  // ~plugin ./my-plugin.js
+  // ~use rate-limit max=100 window=60s
+  // ~use cors origins=https://myapp.com,https://www.myapp.com
+  const isUse = s.startsWith('~use ')
+  const rest = s.slice(isUse ? 5 : 8).trim()
+  const parts = rest.split(/\s+/)
+  const name = parts[0]
+  const opts = {}
+  for (const p of parts.slice(1)) {
+    const eq = p.indexOf('=')
+    if (eq !== -1) opts[p.slice(0, eq)] = p.slice(eq + 1)
+    else opts[p] = true
+  }
+  return { name, opts, inline: isUse }
 }
 function parseAdminLine(s) { const m=s.match(/~admin\s+(\S+)/); return{prefix:m?.[1]||'/admin',guard:'admin'} }
 function parseJobLine(s) { const[name,...rest]=s.split(/\s+/); return{name,action:rest.join(' ')} }
@@ -744,16 +780,36 @@ class AiplangServer {
   registerModel(name, def) { this.models[name]=new Model(name, def); return this.models[name] }
 
   async handle(req, res) {
-    if (req.method !== 'GET' && req.method !== 'DELETE') req.body = await parseBody(req)
-    else req.body = {}
+    const _start = Date.now()
+
+    // Multipart — don't pre-parse, let S3 upload handler do it
+    const isMultipart = (req.headers['content-type'] || '').includes('multipart/form-data')
+    if (req.method !== 'GET' && req.method !== 'DELETE' && !isMultipart) req.body = await parseBody(req)
+    else if (!isMultipart) req.body = {}
+
     const parsed = url.parse(req.url, true)
     req.query = parsed.query; req.path = parsed.pathname
     req.user = extractToken(req) ? verifyJWT(extractToken(req)) : null
 
-    res.setHeader('Access-Control-Allow-Origin','*')
+    // Plugin: rate-limit
+    if (this._rateLimiter && this._rateLimiter(req)) {
+      res.writeHead(429, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Too many requests' })); return
+    }
+
+    // CORS — use plugin config if set, otherwise allow all
+    const origins = this._corsOrigins || ['*']
+    const origin = req.headers['origin'] || ''
+    const allowOrigin = origins.includes('*') ? '*' : (origins.includes(origin) ? origin : origins[0])
+    res.setHeader('Access-Control-Allow-Origin', allowOrigin)
     res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,PATCH,DELETE,OPTIONS')
     res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization')
     if (req.method==='OPTIONS') { res.writeHead(204); res.end(); return }
+
+    // Plugin: helmet (security headers)
+    if (this._helmetHeaders) {
+      for (const [k, v] of Object.entries(this._helmetHeaders)) res.setHeader(k, v)
+    }
 
     for (const route of this.routes) {
       if (route.method !== req.method) continue
@@ -764,6 +820,7 @@ class AiplangServer {
       res.noContent = () => { res.writeHead(204); res.end() }
       res.redirect  = (u) => { res.writeHead(302,{Location:u}); res.end() }
       try { await route.handler(req, res) } catch(e) { console.error('[aiplang] Error:', e.message); if(!res.writableEnded) res.json(500,{error:'Internal server error'}) }
+      if (this._requestLogger) this._requestLogger(req, Date.now() - _start)
       return
     }
     res.writeHead(404,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:'Not found'}))
@@ -852,6 +909,354 @@ function baseCSS(theme) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// S3 — Amazon S3 / R2 / MinIO / Compatible Storage
+// ═══════════════════════════════════════════════════════════════════
+
+let S3_CONFIG = null
+let S3_CLIENT = null
+
+function setupS3(config) {
+  S3_CONFIG = {
+    key:      resolveEnv(config.key || '$AWS_ACCESS_KEY_ID'),
+    secret:   resolveEnv(config.secret || '$AWS_SECRET_ACCESS_KEY'),
+    bucket:   resolveEnv(config.bucket || '$S3_BUCKET'),
+    region:   resolveEnv(config.region || 'us-east-1'),
+    acl:      config.acl || 'private',
+    prefix:   config.prefix || '',
+    maxSize:  parseSize(config.maxSize || '10mb'),
+    allowedTypes: config.allowedTypes || null,
+    endpoint: config.endpoint ? resolveEnv(config.endpoint) : null,
+  }
+
+  const isMock = !S3_CONFIG.key || S3_CONFIG.key.startsWith('$') || S3_CONFIG.key.includes('mock')
+  if (isMock) {
+    console.log('[aiplang] S3: mock mode (set AWS_ACCESS_KEY_ID for real storage)')
+    S3_CLIENT = null
+    return
+  }
+  try {
+    const { S3Client } = require('@aws-sdk/client-s3')
+    const clientOpts = { region: S3_CONFIG.region, credentials: { accessKeyId: S3_CONFIG.key, secretAccessKey: S3_CONFIG.secret } }
+    if (S3_CONFIG.endpoint) clientOpts.endpoint = S3_CONFIG.endpoint
+    S3_CLIENT = new S3Client(clientOpts)
+    console.log(`[aiplang] S3: live mode — bucket=${S3_CONFIG.bucket} region=${S3_CONFIG.region}${S3_CONFIG.endpoint?' endpoint='+S3_CONFIG.endpoint:''}`)
+  } catch (e) {
+    console.log('[aiplang] S3: AWS SDK not available, using mock. npm install @aws-sdk/client-s3')
+    S3_CLIENT = null
+  }
+}
+
+function parseSize(s) {
+  if (typeof s === 'number') return s
+  const m = String(s).match(/^(\d+)(kb|mb|gb)?$/i)
+  if (!m) return 10 * 1024 * 1024
+  const n = parseInt(m[1]), u = (m[2] || 'mb').toLowerCase()
+  return n * ({ kb: 1024, mb: 1024*1024, gb: 1024*1024*1024 }[u] || 1024*1024)
+}
+
+async function s3Upload(key, buffer, contentType, acl) {
+  if (!S3_CLIENT) {
+    // Mock: save locally to ./uploads/
+    const uploadsDir = path.join(process.cwd(), 'uploads')
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true })
+    const localPath = path.join(uploadsDir, path.basename(key))
+    fs.writeFileSync(localPath, buffer)
+    const mockUrl = `http://localhost:${process.env.PORT || 3000}/uploads/${path.basename(key)}`
+    console.log(`[aiplang:s3] MOCK upload → ${localPath}`)
+    return { key, url: mockUrl, size: buffer.length, mock: true }
+  }
+  const { PutObjectCommand } = require('@aws-sdk/client-s3')
+  const cmd = new PutObjectCommand({
+    Bucket: S3_CONFIG.bucket,
+    Key: key,
+    Body: buffer,
+    ContentType: contentType,
+    ...(acl !== 'private' ? { ACL: acl } : {})
+  })
+  await S3_CLIENT.send(cmd)
+  const url = S3_CONFIG.endpoint
+    ? `${S3_CONFIG.endpoint}/${S3_CONFIG.bucket}/${key}`
+    : `https://${S3_CONFIG.bucket}.s3.${S3_CONFIG.region}.amazonaws.com/${key}`
+  return { key, url, size: buffer.length }
+}
+
+async function s3Delete(key) {
+  if (!S3_CLIENT) {
+    const localPath = path.join(process.cwd(), 'uploads', path.basename(key))
+    if (fs.existsSync(localPath)) fs.unlinkSync(localPath)
+    return { deleted: key, mock: true }
+  }
+  const { DeleteObjectCommand } = require('@aws-sdk/client-s3')
+  await S3_CLIENT.send(new DeleteObjectCommand({ Bucket: S3_CONFIG.bucket, Key: key }))
+  return { deleted: key }
+}
+
+async function s3PresignedUrl(key, expiresIn = 3600) {
+  if (!S3_CLIENT) {
+    return { url: `http://localhost:${process.env.PORT || 3000}/uploads/${path.basename(key)}?mock=1`, expires_in: expiresIn }
+  }
+  const { GetObjectCommand } = require('@aws-sdk/client-s3')
+  const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
+  const url = await getSignedUrl(S3_CLIENT, new GetObjectCommand({ Bucket: S3_CONFIG.bucket, Key: key }), { expiresIn })
+  return { url, expires_in: expiresIn }
+}
+
+// Multipart form parser — no external deps
+function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', c => chunks.push(c))
+    req.on('end', () => {
+      try {
+        const body = Buffer.concat(chunks)
+        const ct = req.headers['content-type'] || ''
+        const bm = ct.match(/boundary=([^\s;]+)/)
+        if (!bm) { resolve({ fields: {}, files: [] }); return }
+        const boundary = Buffer.from('--' + bm[1])
+        const fields = {}, files = []
+        const parts = splitBuffer(body, boundary)
+        for (const part of parts) {
+          if (!part.length) continue
+          const sep = part.indexOf('\r\n\r\n')
+          if (sep === -1) continue
+          const headerStr = part.slice(0, sep).toString()
+          const content = part.slice(sep + 4)
+          const data = content.slice(0, content.length - 2) // remove trailing \r\n
+          const namem = headerStr.match(/name="([^"]+)"/)
+          const filem = headerStr.match(/filename="([^"]+)"/)
+          const ctm = headerStr.match(/Content-Type:\s*([^\r\n]+)/i)
+          if (!namem) continue
+          if (filem) {
+            files.push({ fieldname: namem[1], originalname: filem[1], mimetype: ctm?.[1]?.trim() || 'application/octet-stream', buffer: data, size: data.length })
+          } else {
+            fields[namem[1]] = data.toString()
+          }
+        }
+        resolve({ fields, files })
+      } catch (e) { reject(e) }
+    })
+    req.on('error', reject)
+  })
+}
+
+function splitBuffer(buf, separator) {
+  const parts = []; let start = 0
+  while (true) {
+    const idx = indexOfBuffer(buf, separator, start)
+    if (idx === -1) break
+    parts.push(buf.slice(start, idx))
+    start = idx + separator.length + 2 // skip \r\n
+  }
+  return parts.filter(p => p.length > 0)
+}
+function indexOfBuffer(buf, sep, offset = 0) {
+  for (let i = offset; i <= buf.length - sep.length; i++) {
+    if (buf.slice(i, i + sep.length).equals(sep)) return i
+  }
+  return -1
+}
+
+function registerS3Routes(server) {
+  const cfg = S3_CONFIG
+
+  // Serve local uploads in mock mode
+  if (!S3_CLIENT) {
+    server.addRoute('GET', '/uploads/:filename', (req, res) => {
+      const fp = path.join(process.cwd(), 'uploads', req.params.filename)
+      if (fs.existsSync(fp)) { res.writeHead(200, { 'Content-Type': getMime(req.params.filename) }); res.end(fs.readFileSync(fp)) }
+      else { res.writeHead(404); res.end('Not found') }
+    })
+  }
+
+  // POST /api/upload — upload one or more files
+  server.addRoute('POST', '/api/upload', async (req, res) => {
+    try {
+      const { fields, files } = await parseMultipart(req)
+      if (!files.length) { res.error(400, 'No files uploaded'); return }
+
+      const results = []
+      for (const file of files) {
+        // Size check
+        if (file.size > cfg.maxSize) { res.error(413, `File too large. Max: ${cfg.maxSize / 1024 / 1024}MB`); return }
+        // Type check
+        if (cfg.allowedTypes) {
+          const ext = path.extname(file.originalname).slice(1).toLowerCase()
+          const okMime = cfg.allowedTypes.some(t => file.mimetype.includes(t) || t === ext)
+          if (!okMime) { res.error(415, `File type not allowed. Allowed: ${cfg.allowedTypes.join(', ')}`); return }
+        }
+        const ext = path.extname(file.originalname)
+        const key = cfg.prefix + uuid() + ext
+        const result = await s3Upload(key, file.buffer, file.mimetype, cfg.acl)
+        results.push({ ...result, originalname: file.originalname, mimetype: file.mimetype, fieldname: file.fieldname })
+        emit('s3.uploaded', { key, size: file.size, mimetype: file.mimetype })
+      }
+      res.json(200, files.length === 1 ? results[0] : results)
+    } catch (e) {
+      console.error('[aiplang:s3] Upload error:', e.message)
+      res.error(500, e.message)
+    }
+  })
+
+  // DELETE /api/upload/:key — delete a file
+  server.addRoute('DELETE', '/api/upload/:key', async (req, res) => {
+    try {
+      const key = decodeURIComponent(req.params.key)
+      const result = await s3Delete(cfg.prefix ? cfg.prefix + key : key)
+      emit('s3.deleted', { key })
+      res.json(200, result)
+    } catch (e) { res.error(500, e.message) }
+  })
+
+  // GET /api/upload/presign?key=xxx&expires=3600 — get presigned URL
+  server.addRoute('GET', '/api/upload/presign', async (req, res) => {
+    const key = req.query.key
+    if (!key) { res.error(400, 'key is required'); return }
+    const expires = parseInt(req.query.expires || '3600')
+    try {
+      const result = await s3PresignedUrl(key, expires)
+      res.json(200, result)
+    } catch (e) { res.error(500, e.message) }
+  })
+
+  console.log(`[aiplang] S3: POST /api/upload | DELETE /api/upload/:key | GET /api/upload/presign`)
+}
+
+function getMime(filename) {
+  const ext = path.extname(filename).toLowerCase()
+  const types = { '.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.gif':'image/gif','.webp':'image/webp','.svg':'image/svg+xml','.pdf':'application/pdf','.mp4':'video/mp4','.mp3':'audio/mpeg','.json':'application/json','.txt':'text/plain','.csv':'text/csv','.zip':'application/zip' }
+  return types[ext] || 'application/octet-stream'
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PLUGIN SYSTEM — ~plugin ./my-plugin.js | ~use rate-limit max=100
+// ═══════════════════════════════════════════════════════════════════
+//
+// A plugin is a JS module that exports:
+//   module.exports = {
+//     name: 'my-plugin',
+//     setup(server, app, utils) {
+//       // server  = AiplangServer instance (.addRoute, .models)
+//       // app     = parsed .flux app definition
+//       // utils   = { uuid, now, emit, on, dispatch, resolveEnv, dbRun, dbAll, dbGet }
+//     }
+//   }
+//
+// Or a factory function:
+//   module.exports = (opts) => ({ name: '...', setup(srv, app, utils) { ... } })
+
+const PLUGIN_UTILS = {
+  uuid, now, emit, on, dispatch, resolveEnv, dbRun, dbAll, dbGet,
+  parseSize, s3Upload, s3Delete, s3PresignedUrl,
+  generateJWT, verifyJWT,
+  getMime,
+}
+
+async function loadPlugins(plugins, server, app) {
+  for (const plug of plugins) {
+    try {
+      let mod
+      // Local file plugin
+      if (plug.name.startsWith('./') || plug.name.startsWith('../') || plug.name.startsWith('/')) {
+        const fullPath = path.resolve(path.dirname(process.argv[2] || '.'), plug.name)
+        if (!fs.existsSync(fullPath)) { console.warn(`[aiplang:plugin] Not found: ${fullPath}`); continue }
+        mod = require(fullPath)
+      } else {
+        // npm package plugin
+        try { mod = require(plug.name) } catch {
+          try { mod = require(path.join(process.cwd(), 'node_modules', plug.name)) } catch {
+            console.warn(`[aiplang:plugin] Cannot load: ${plug.name} — run: npm install ${plug.name}`)
+            continue
+          }
+        }
+      }
+
+      // Support factory function
+      if (typeof mod === 'function') mod = mod(plug.opts)
+      if (!mod || typeof mod.setup !== 'function') {
+        console.warn(`[aiplang:plugin] ${plug.name}: must export { name, setup(srv, app, utils) }`)
+        continue
+      }
+
+      await mod.setup(server, app, { ...PLUGIN_UTILS, opts: plug.opts })
+      console.log(`[aiplang] Plugin: ${mod.name || plug.name} ✓`)
+    } catch (e) {
+      console.error(`[aiplang:plugin] Error in ${plug.name}:`, e.message)
+    }
+  }
+}
+
+// Built-in ~use plugins (inline, no file needed)
+const BUILTIN_PLUGINS = {
+  // ~use cors origins=https://myapp.com
+  'cors': {
+    name: 'cors',
+    setup(server, app, { opts }) {
+      const origins = opts.origins ? opts.origins.split(',') : ['*']
+      const orig = server._corsOrigins = origins
+      console.log(`[aiplang] Plugin: cors origins=${orig.join(',')}`)
+    }
+  },
+  // ~use rate-limit max=100 window=60s
+  'rate-limit': {
+    name: 'rate-limit',
+    setup(server, app, { opts }) {
+      const max = parseInt(opts.max || '100')
+      const windowMs = parseWindow(opts.window || '60s')
+      const store = {}
+      server._rateLimiter = (req) => {
+        const ip = req.socket.remoteAddress || 'unknown'
+        const key = `${ip}:${Math.floor(Date.now() / windowMs)}`
+        store[key] = (store[key] || 0) + 1
+        return store[key] > max
+      }
+      console.log(`[aiplang] Plugin: rate-limit max=${max} window=${opts.window||'60s'}`)
+    }
+  },
+  // ~use logger format=tiny|combined
+  'logger': {
+    name: 'logger',
+    setup(server, app, { opts }) {
+      server._requestLogger = (req, ms) => {
+        const fmt = opts.format || 'tiny'
+        if (fmt === 'tiny') console.log(`[aiplang] ${req.method} ${req.url} — ${ms}ms`)
+        else console.log(`[aiplang] ${new Date().toISOString()} ${req.method} ${req.url} ${req.headers['user-agent'] || '-'} — ${ms}ms`)
+      }
+      console.log(`[aiplang] Plugin: logger format=${opts.format||'tiny'}`)
+    }
+  },
+  // ~use helmet (basic security headers)
+  'helmet': {
+    name: 'helmet',
+    setup(server, app, { opts }) {
+      server._helmetHeaders = {
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'X-XSS-Protection': '1; mode=block',
+        'Referrer-Policy': 'no-referrer',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+        ...(opts.csp ? { 'Content-Security-Policy': opts.csp } : {})
+      }
+      console.log(`[aiplang] Plugin: helmet (security headers)`)
+    }
+  },
+  // ~use compression (gzip responses)
+  'compression': {
+    name: 'compression',
+    setup(server, app, { opts }) {
+      server._compress = true
+      console.log(`[aiplang] Plugin: compression (gzip)`)
+    }
+  },
+}
+
+function parseWindow(s) {
+  const m = String(s).match(/^(\d+)(s|m|h)?$/)
+  if (!m) return 60000
+  const n = parseInt(m[1]), u = m[2] || 's'
+  return n * ({ s:1000, m:60000, h:3600000 }[u] || 1000)
+}
+
 // MAIN
 // ═══════════════════════════════════════════════════════════════════
 async function startServer(aipFile, port = 3000) {
@@ -867,6 +1272,12 @@ async function startServer(aipFile, port = 3000) {
 
   // Mail setup
   if (app.mail) setupMail(app.mail)
+
+  // S3 setup
+  if (app.s3) {
+    setupS3(app.s3)
+    registerS3Routes(srv)
+  }
 
   // DB setup
   const dbFile = app.db ? resolveEnv(app.db.dsn) : ':memory:'
@@ -896,9 +1307,17 @@ async function startServer(aipFile, port = 3000) {
   if (app.stripe) {
     setupStripe(app.stripe)
     registerStripeRoutes(srv, app.stripe)
-    // Add subscription guard to compileRoute
     STRIPE_PLANS = app.stripe.plans || {}
   }
+
+  // Plugins — built-in ~use first, then external ~plugin files
+  const builtinPlugs = app.plugins.filter(p => p.inline && BUILTIN_PLUGINS[p.name])
+  const externalPlugs = app.plugins.filter(p => !p.inline || !BUILTIN_PLUGINS[p.name])
+  for (const p of builtinPlugs) {
+    try { await BUILTIN_PLUGINS[p.name].setup(srv, app, { ...PLUGIN_UTILS, opts: p.opts }) }
+    catch (e) { console.error(`[aiplang:plugin] ${p.name}:`, e.message) }
+  }
+  if (externalPlugs.length) await loadPlugins(externalPlugs, srv, app)
 
   // Frontend
   for (const page of app.pages) {
@@ -918,18 +1337,31 @@ async function startServer(aipFile, port = 3000) {
 
   // Health
   srv.addRoute('GET', '/health', (req, res) => res.json(200, {
-    status:'ok', version:'2.0.1',
+    status:'ok', version:'2.1.3',
     models: app.models.map(m=>m.name),
     routes: app.apis.length, pages: app.pages.length,
     admin: app.admin?.prefix || null,
-    mail: !!app.mail, jobs: QUEUE.length
+    mail: !!app.mail, jobs: QUEUE.length,
+    s3: app.s3 ? {
+      mode: S3_CLIENT ? 'live' : 'mock',
+      bucket: S3_CONFIG?.bucket || null,
+      region: S3_CONFIG?.region || null,
+      endpoint: S3_CONFIG?.endpoint || null,
+      routes: ['POST /api/upload', 'DELETE /api/upload/:key', 'GET /api/upload/presign']
+    } : null,
+    stripe: app.stripe ? {
+      mode: STRIPE ? 'live' : 'mock',
+      plans: Object.keys(app.stripe.plans || {}),
+      routes: ['/api/stripe/checkout', '/api/stripe/portal', '/api/stripe/subscription', '/api/stripe/webhook']
+    } : null,
+    plugins: app.plugins.map(p => p.name)
   }))
 
   srv.listen(port)
   return srv
 }
 
-module.exports = { startServer, parseApp, Model, getDB, dispatch, on, sendMail }
+module.exports = { startServer, parseApp, Model, getDB, dispatch, on, emit, sendMail, setupStripe, registerStripeRoutes, setupS3, registerS3Routes, s3Upload, s3Delete, s3PresignedUrl, PLUGIN_UTILS }
 if (require.main === module) {
   const f=process.argv[2], p=parseInt(process.argv[3]||process.env.PORT||'3000')
   if (!f) { console.error('Usage: node server.js <app.flux> [port]'); process.exit(1) }
