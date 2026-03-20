@@ -752,13 +752,14 @@ td{padding:.875rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.04);color:#
 </div>
 <script>
 const prefix = '${prefix}'
-// Token from cookie (set by login) or fallback to localStorage for compat
-function getAdminToken() {
-  const cookie = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('aiplang_admin='))
-  return cookie ? cookie.split('=')[1] : (localStorage.getItem('admin_token') || '')
-}
+// API calls use credentials:include — HttpOnly cookie is sent automatically
 async function api(method, path, body) {
-  const r = await fetch(prefix + '/api' + path, {method, headers:{'Content-Type':'application/json','Authorization':'Bearer '+getAdminToken()},body:body?JSON.stringify(body):undefined})
+  const r = await fetch(prefix + '/api' + path, {
+    method,
+    headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: body ? JSON.stringify(body) : undefined
+  })
   return r.json()
 }
 async function loadModel(name, page=1) {
@@ -794,13 +795,9 @@ function renderAdminLogin(prefix) {
 <button onclick="login()">Sign in</button></div>
 <script>
 async function login(){
-  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('email').value,password:document.getElementById('pass').value})})
+  const r=await fetch('${prefix}/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('email').value,password:document.getElementById('pass').value}),credentials:'same-origin'})
   const d=await r.json()
-  if(d.token){
-    localStorage.setItem('admin_token',d.token);
-    document.cookie='aiplang_admin='+d.token+';path=/;SameSite=Strict;max-age=86400';
-    location.href='${prefix}'
-  }
+  if(d.ok){location.href='${prefix}'}
   else document.getElementById('err').textContent=d.error||'Invalid credentials'
 }
 document.addEventListener('keydown',e=>{if(e.key==='Enter')login()})
@@ -891,7 +888,16 @@ function matchRoute(pattern, reqPath) {
   for(let i=0;i<pp.length;i++){if(pp[i].startsWith(':'))params[pp[i].slice(1)]=rp[i];else if(pp[i]!==rp[i])return null}
   return params
 }
-function extractToken(req) { const a=req.headers.authorization; return a?.startsWith('Bearer ')?a.slice(7):null }
+function extractToken(req) {
+  // 1. Bearer token from Authorization header
+  const a = req.headers.authorization
+  if (a?.startsWith('Bearer ')) return a.slice(7)
+  // 2. HttpOnly cookie (admin panel)
+  const cookies = req.headers['cookie'] || ''
+  const adminCookie = cookies.split(';').map(s=>s.trim()).find(s=>s.startsWith('aiplang_admin='))
+  if (adminCookie) return adminCookie.slice('aiplang_admin='.length)
+  return null
+}
 const MAX_BODY_BYTES = parseInt(process.env.MAX_BODY_BYTES || '1048576') // 1MB default
 async function parseBody(req) {
   return new Promise((resolve) => {
@@ -1429,7 +1435,7 @@ async function startServer(aipFile, port = 3000) {
 
   // Health
   srv.addRoute('GET', '/health', (req, res) => res.json(200, {
-    status:'ok', version:'2.5.0',
+    status:'ok', version:'2.7.0',
     models: app.models.map(m=>m.name),
     routes: app.apis.length, pages: app.pages.length,
     admin: app.admin?.prefix || null,

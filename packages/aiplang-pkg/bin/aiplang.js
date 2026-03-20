@@ -5,7 +5,7 @@ const fs   = require('fs')
 const path = require('path')
 const http = require('http')
 
-const VERSION     = '2.6.2'
+const VERSION     = '2.7.0'
 const RUNTIME_DIR = path.join(__dirname, '..', 'runtime')
 const cmd         = process.argv[2]
 const args        = process.argv.slice(3)
@@ -119,6 +119,23 @@ api POST /api/auth/login {
 api GET /api/me {
   ~guard auth
   return $auth.user
+}
+
+api GET /api/users {
+  ~guard admin
+  ~query page=1
+  return User.paginate($page, 20)
+}
+
+api PUT /api/users/:id {
+  ~guard admin
+  update User($id, $body)
+  return $updated
+}
+
+api DELETE /api/users/:id {
+  ~guard admin
+  delete User($id)
 }
 
 api GET /api/stats {
