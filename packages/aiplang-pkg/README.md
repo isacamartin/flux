@@ -6,9 +6,16 @@
 [![npm](https://img.shields.io/npm/v/aiplang)](https://npmjs.com/package/aiplang)
 
 ```bash
+# npm
 npx aiplang init my-app
-cd my-app
-npx aiplang serve
+
+# yarn
+yarn dlx aiplang init my-app
+
+# pnpm
+pnpm dlx aiplang init my-app
+
+cd my-app && npx aiplang serve
 ```
 
 Ask Claude to generate a page → paste into `pages/home.aip` → see it live.
@@ -56,11 +63,17 @@ foot{© 2025}
 ## Commands
 
 ```bash
+# Install globally (pick one)
+npm install -g aiplang
+yarn global add aiplang
+pnpm add -g aiplang
+
+# Or run directly without installing
 npx aiplang serve                    # dev server + hot reload
 npx aiplang build pages/             # compile → static HTML
 npx aiplang start app.aip            # full-stack Node.js server
 npx aiplang init my-app              # create project
-npx aiplang init my-app --template saas|landing|crud|dashboard|blog|ecommerce|todo|analytics|chat
+npx aiplang init my-app --template saas|landing|crud|dashboard|blog|ecommerce|todo|analytics|chat|hello
 npx aiplang template list            # list saved templates
 npx aiplang template save my-tpl     # save current project as template
 ```
