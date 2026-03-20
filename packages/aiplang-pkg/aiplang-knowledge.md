@@ -137,3 +137,35 @@ npx aiplang start app.aip    # full-stack
 npx aiplang serve            # frontend dev
 npx aiplang build pages/     # static build
 ```
+
+## Customization (v2.8) — React-like props
+
+### Block modifiers (apply to any block)
+```
+hero{...}     variant:left|minimal|tall|dark-cta
+row3{...}     variant:bordered|numbered
+form{...}     variant:inline|minimal
+pricing{...}  variant:compact
+sect{...}     variant:accent|dark|full
+bg:#hexcolor  — background color on any block
+style:{padding:2rem,color:red}  — inline CSS
+```
+
+### New blocks
+```
+card{Title|Subtitle|img:url|/path:Label|#Badge}
+cols2{ left content || right content }
+cols3{ col1 || col2 || col3 }
+divider{Optional label}
+hr{}
+badge{Label text}
+spacer{2rem}
+html{<any>HTML with @state interpolation</any>}
+each @list { template with {item.field} }
+```
+
+### Row colors (per card)
+```
+row3{blue|bolt>Fast>Desc|green|shield>Secure>Desc|red|fire>Hot>Desc}
+# colors: red orange yellow green teal blue indigo purple pink cyan lime amber
+```
