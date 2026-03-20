@@ -1,17 +1,17 @@
 {
   "name": "aiplang",
-  "version": "2.7.0",
-  "description": "AI-first full-stack language. Frontend + Backend + DB + Auth in one file. Competes with Laravel.",
+  "version": "2.7.1",
+  "description": "AI-first web language. One .aip file = complete app. Frontend + backend + database + auth.",
   "keywords": [
     "aiplang",
     "ai",
+    "llm",
     "web",
     "language",
-    "compiler",
-    "ssg",
-    "reactive",
+    "full-stack",
     "claude",
-    "full-stack"
+    "generator",
+    "no-code"
   ],
   "author": "isacamartin",
   "license": "MIT",

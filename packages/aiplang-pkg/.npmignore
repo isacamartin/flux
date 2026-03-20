@@ -1,0 +1,23 @@
+# Never publish these
+node_modules/
+*/node_modules/
+**/node_modules/
+
+# Dev files
+*.log
+.env
+.env.*
+*.db
+dist/
+_site/
+uploads/
+
+# Tests
+test/
+tests/
+*.test.js
+*.spec.js
+
+# CI/CD
+.github/
+.travis.yml
