@@ -1877,7 +1877,8 @@ async function parseBody(req) {
 // ═══════════════════════════════════════════════════════════════════
 function renderHTML(page, allPages) {
   const needsJS=page.queries.length>0||page.blocks.some(b=>['table','form','if','btn','select','faq'].includes(b.kind))
-  const body=page.blocks.map(b=>renderBlock(b)).join('')
+  const ssrData = page.ssrData || {}
+  const body=page.blocks.map(b=>renderBlock(b, ssrData)).join('')
   const config=needsJS?JSON.stringify({id:page.id,theme:page.theme,state:page.state,routes:allPages.map(p=>p.route),queries:page.queries}):''
   const hydrate=needsJS?`<script>window.__AIPLANG_PAGE__=${config};</script><script src="/aiplang-hydrate.js" defer></script>`:''
   const themeCSS=page.themeVars?genThemeCSS(page.themeVars):''
@@ -1885,8 +1886,9 @@ function renderHTML(page, allPages) {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${page.id}</title><style>${baseCSS(page.theme)}${customCSS}${themeCSS}</style></head><body>${body}${hydrate}</body></html>`
 }
 
-function renderBlock(b) {
+function renderBlock(b, ssrData) {
   const line=b.rawLine
+  ssrData = ssrData || {}
   let animate='',extraClass=''
   const am=line.match(/\banimate:(\S+)/); if(am)animate='fx-anim-'+am[1]
   const cm=line.match(/\bclass:(\S+)/); if(cm)extraClass=cm[1]
@@ -1905,6 +1907,23 @@ function renderBlock(b) {
     case 'faq': return rFaq(line)
     case 'testimonial':return rTestimonial(line)
     case 'gallery':return rGallery(line)
+    case 'each': {
+      const _bind = line.match(/data-fx-each="([^"]+)"/)
+      const _tpl  = line.match(/data-fx-tpl="([^"]+)"/)
+      const _bkey = (_bind && _bind[1]) ? _bind[1].replace('@','') : ''
+      const _data = ssrData[_bkey]
+      if (_data && Array.isArray(_data) && _data.length > 0) {
+        const _t = _tpl ? _tpl[1] : ''
+        const _items = _data.map(item => {
+          let row = _t
+          row = row.replace(/\{item\.(\w+)\}/g, (_,k) => esc(String(item[k]??'')))
+          row = row.replace(/\{item\}/g, esc(String(item??'')))
+          return row
+        }).join('')
+        return `<div class="fx-each fx-each-ssr">${_items}</div>\n`
+      }
+      return line + '\n'
+    }
     case 'raw': return extractBody(line)+'\n'
     case 'if':  return `<div class="fx-if-wrap" data-fx-if="${esc(extractCond(line))}" style="display:none"></div>\n`
     default: return ''
@@ -2407,8 +2426,21 @@ async function startServer(aipFile, port = 3000) {
 
   // Frontend
   for (const page of app.pages) {
-    srv.addRoute('GET', page.route, (req, res) => {
-      const html = renderHTML(page, app.pages)
+    srv.addRoute('GET', page.route, async (req, res) => {
+      // Executar SSR queries para each{} blocks
+      const ssrData = {}
+      for (const q of (page.queries||[])) {
+        if (q.trigger === 'ssr' || q.trigger === 'mount') {
+          try {
+            const Model = q.model && srv.models[q.model]
+            if (Model) {
+              const data = await Model.all()
+              if (q.binding) ssrData[q.binding.replace('@','')] = data
+            }
+          } catch(e) { /* ignore SSR query errors */ }
+        }
+      }
+      const html = renderHTML({...page, ssrData}, app.pages)
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(html)
     })
     console.log(`[aiplang] Page:   ${page.route}`)
@@ -2462,7 +2494,7 @@ async function startServer(aipFile, port = 3000) {
   })
 
   srv.addRoute('GET', '/health', (req, res) => res.json(200, {
-    status:'ok', version:'2.11.11',
+    status:'ok', version:'2.11.12',
     models: app.models.map(m=>m.name),
     routes: app.apis.length, pages: app.pages.length,
     admin: app.admin?.prefix || null,

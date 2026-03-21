@@ -5,7 +5,51 @@ const fs   = require('fs')
 const path = require('path')
 const http = require('http')
 
-const VERSION     = '2.11.11'
+
+// ── ANSI colors — sem dependências ───────────────────────────────
+const CLR = {
+  reset: '\x1b[0m',
+  bold:  '\x1b[1m',
+  dim:   '\x1b[2m',
+  green: '\x1b[32m',
+  blue:  '\x1b[34m',
+  cyan:  '\x1b[36m',
+  yellow:'\x1b[33m',
+  red:   '\x1b[31m',
+  white: '\x1b[37m',
+  gray:  '\x1b[90m',
+}
+const c_ = (color, text) => process.stdout.isTTY ? CLR[color]+text+CLR.reset : text
+const bold  = t => c_('bold', t)
+const dim   = t => c_('dim', t)
+const green = t => c_('green', t)
+const blue  = t => c_('blue', t)
+const cyan  = t => c_('cyan', t)
+const yellow= t => c_('yellow', t)
+const red   = t => c_('red', t)
+const gray  = t => c_('gray', t)
+
+// Spinner simples
+class Spinner {
+  constructor(text) {
+    this.frames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏']
+    this.i = 0; this.text = text; this.timer = null
+  }
+  start() {
+    if (!process.stdout.isTTY) { process.stdout.write(this.text+'...\n'); return this }
+    this.timer = setInterval(() => {
+      process.stdout.write('\r  ' + cyan(this.frames[this.i++ % this.frames.length]) + '  ' + this.text + '   ')
+    }, 80)
+    return this
+  }
+  stop(ok=true, msg='') {
+    if (this.timer) { clearInterval(this.timer); this.timer = null }
+    if (process.stdout.isTTY) process.stdout.write('\r')
+    console.log('  ' + (ok ? green('✓') : red('✗')) + '  ' + (msg||this.text) + '   ')
+  }
+}
+
+const VERSION     = '2.11.12'
 const RUNTIME_DIR = path.join(__dirname, '..', 'runtime')
 const cmd         = process.argv[2]
 const args        = process.argv.slice(3)
@@ -26,55 +70,27 @@ const hSize = n => n<1024?`${n}B`:`${(n/1024).toFixed(1)}KB`
 
 if (!cmd||cmd==='--help'||cmd==='-h') {
   console.log(`
-  aiplang v${VERSION}
-  AI-first web language — full apps in ~20 lines.
+  ${bold(cyan('aiplang'))} ${dim('v'+VERSION)}  ${gray('AI-First Web Language')}
 
-  Usage:
-    npx aiplang init [name]                  create project (default template)
-    npx aiplang init [name] --template <t>   use template: saas|landing|crud|dashboard|portfolio|blog
-    npx aiplang init [name] --template ./my.aip     use a local .aip file as template
-    npx aiplang init [name] --template my-custom     use a saved custom template
-    npx aiplang serve [dir]                  dev server + hot reload
-    npx aiplang build [dir/file]             compile → static HTML
-    npx aiplang validate <app.aip>           validate syntax with AI-friendly errors
-    npx aiplang types   <app.aip>            generate TypeScript types (.d.ts)
-    npx aiplang context [app.aip]            dump minimal AI context (<500 tokens)
-    npx aiplang new <page>                   new page template
-    npx aiplang --version
+  ${bold('Usage:')}
+    ${cyan('npx aiplang')} ${yellow('<command>')} ${gray('[options]')}
 
-  Full-stack:
-    npx aiplang start app.aip           start full-stack server (API + DB + frontend)
-    PORT=8080 aiplang start app.aip     custom port
+  ${bold('Commands:')}
+    ${green('start')}   ${gray('<file.aip> [port]')}    Start dev server
+    ${green('build')}   ${gray('<file.aip> --out <dir>')} Build static HTML
+    ${green('validate')}${gray(' <file.aip>')}           Lint syntax
+    ${green('types')}   ${gray('<file.aip>')}            Generate TypeScript .d.ts
+    ${green('context')} ${gray('<file.aip>')}            AI context summary
+    ${green('init')}    ${gray('[project-name]')}        Create new project
 
-  Templates:
-    npx aiplang template list                list all templates (built-in + custom)
-    npx aiplang template save <n>            save current project as template
-    npx aiplang template save <n> --from <f> save a specific .aip file as template
-    npx aiplang template edit <n>            open template in editor
-    npx aiplang template show <n>            print template source
-    npx aiplang template export <n>          export template to .aip file
-    npx aiplang template remove <n>          delete a custom template
+  ${bold('Examples:')}
+    ${dim('npx aiplang start app.aip')}
+    ${dim('npx aiplang build app.aip --out ./dist')}
+    ${dim('npx aiplang init my-saas')}
 
-  Custom template variables:
-    {{name}}  project name
-    {{year}}  current year
-
-  Customization:
-    # Bancos de dados suportados:
-    #   ~db sqlite   ./app.db          (padrão — sem configuração)
-    #   ~db pg       $DATABASE_URL     (PostgreSQL)
-    #   ~db mysql    $MYSQL_URL        (MySQL / MariaDB)
-    #   ~db mongodb  $MONGODB_URL      (MongoDB)
-    #   ~db redis    $REDIS_URL        (Redis — cache/session)
-    ~theme accent=#7c3aed radius=1.5rem font=Syne bg=#000 text=#fff
-    hero{...} animate:fade-up
-    row3{...} class:my-class animate:stagger
-    raw{<div>any HTML here</div>}
-
-  GitHub: https://github.com/isacamartin/aiplang
-  npm:    https://npmjs.com/package/aiplang
-  Docs:   https://isacamartin.github.io/aiplang
-  `)
+  ${bold('Docs:')}  ${blue('https://github.com/isacamartin/aiplang')}
+  ${bold('npm:')}   ${blue('npmjs.com/package/aiplang')}
+`)
   process.exit(0)
 }
 if (cmd==='--version'||cmd==='-v') { console.log(`aiplang v${VERSION}`); process.exit(0) }
@@ -686,7 +702,7 @@ function generateTypes(app, srcFile) {
   }
 
   lines.push(`// ── aiplang version ──────────────────────────────────────────`)
-  lines.push(`export const AIPLANG_VERSION     = '2.11.11'`)
+  lines.push(`export const AIPLANG_VERSION     = '2.11.12'`)
   lines.push(``)
   return lines.join('\n')
 }
@@ -697,7 +713,7 @@ function _cap(s) { return s ? s[0].toUpperCase() + s.slice(1) : s }
 function validateAipSrc(source) {
   const errors = []
   const lines = source.split('\n')
-  const knownDirs = new Set(['db','auth','env','mail','s3','stripe','plan','admin','realtime','use','plugin','import','store','ssr','interval','mount','theme','guard','validate','unique','hash','check','cache','rateLimit','broadcast','soft-delete','belongs'])
+  const knownDirs = new Set(['db','auth','env','mail','s3','stripe','plan','admin','realtime','use','plugin','import','store','ssr','interval','mount','theme','guard','validate','unique','hash','check','cache','rateLimit','broadcast','soft-delete','belongs','var','component','end'])
   for (let i=0; i<lines.length; i++) {
     const line = lines[i].trim()
     if (!line || line.startsWith('#')) continue
@@ -856,7 +872,7 @@ if (cmd==='build') {
   const pages=parsePages(src)
   if(!pages.length){console.error('\n  ✗  No pages found.\n');process.exit(1)}
   fs.mkdirSync(outDir,{recursive:true})
-  console.log(`\n  aiplang build v${VERSION} — ${files.length} file(s)\n`)
+  console.log(`\n  ${bold(cyan('aiplang'))} build ${dim('v'+VERSION)} — ${files.length} file(s)\n`)
   let total=0
   for(const page of pages){
     const html=renderPage(page,pages)
@@ -936,18 +952,49 @@ console.error(`\n  ✗  Unknown command: ${cmd}\n  Run aiplang --help\n`)
 process.exit(1)
 
 function parsePages(src) {
-  // Extrair variáveis globais ~var name = value
+  // ── Extrair variáveis globais ~var ──────────────────────────────
   const gVars = {}
   src.split('\n').forEach(line => {
     const vm = line.trim().match(/^~var\s+(\w+)\s*=\s*(.+)$/)
     if (vm) gVars[vm[1].trim()] = vm[2].trim().replace(/^["']|["']$/g,'')
   })
-  // Expandir $var em todo o src
-  function expand(s) {
-    if (!Object.keys(gVars).length) return s
-    return s.replace(/\$(\w+)/g, (m,k) => gVars[k]!==undefined ? gVars[k] : m)
+
+  // ── Extrair componentes ~component name(params) ... ~end ────────
+  const gComponents = {}
+  const compRx = /^~component\s+(\w+)\s*\(([^)]*)\)\s*$([\s\S]*?)^~end\s*$/mg
+  let m; while((m=compRx.exec(src))!==null) {
+    const name   = m[1].trim()
+    const params = m[2].split(',').map(p=>p.trim()).filter(Boolean)
+    const body   = m[3]
+    gComponents[name] = { params, body }
   }
-  return src.split(/\n---\n/).map(s=>parsePage(expand(s.trim()))).filter(Boolean)
+
+  // ── Expandir ~use name(arg1, arg2) → corpo do componente ───────
+  function expandComponents(s) {
+    if (!Object.keys(gComponents).length) return s
+    return s.replace(/^~use\s+(\w+)\s*\(([^)]*)\)\s*$/mg, (_, name, argsStr) => {
+      const comp = gComponents[name]
+      if (!comp) return `# ~use: component "${name}" not found`
+      const args = argsStr.split(',').map(a=>a.trim())
+      let body = comp.body
+      comp.params.forEach((p,i) => {
+        body = body.replace(new RegExp('\\$'+p, 'g'), args[i] !== undefined ? args[i] : '')
+      })
+      return body
+    })
+  }
+
+  // ── Expandir $var ───────────────────────────────────────────────
+  function expand(s) {
+    let r = expandComponents(s)
+    if (Object.keys(gVars).length)
+      r = r.replace(/\$(\w+)/g, (m,k) => gVars[k]!==undefined ? gVars[k] : m)
+    return r
+  }
+
+  // Remover blocos ~component...~end antes de parsear
+  const cleanSrc = src.replace(/^~component[\s\S]*?^~end\s*$/mg, '')
+  return cleanSrc.split(/\n---\n/).map(s=>parsePage(expand(s.trim()))).filter(Boolean)
 }
 
 function parsePage(src) {
@@ -955,7 +1002,10 @@ function parsePage(src) {
   if(!lines.length) return null
   const p={id:'page',theme:'dark',route:'/',customTheme:null,themeVars:null,state:{},queries:[],blocks:[]}
   for(const line of lines) {
-    if(line.startsWith('~var ')) continue  // já processado globalmente
+    if(line.startsWith('~var '))       continue  // já processado globalmente
+    if(line.startsWith('~component '))  continue  // componente já expandido
+    if(line.startsWith('~use '))        continue  // já expandido
+    if(line.startsWith('~end'))         continue  // fim de componente
     if(line.startsWith('%')) {
       const pts=line.slice(1).trim().split(/\s+/)
       p.id=pts[0]||'page'; p.route=pts[2]||'/'
@@ -1333,7 +1383,27 @@ function renderBlock(b, page) {
     case 'chart':       return rChart(b)
     case 'kanban':      return rKanban(b)
     case 'editor':      return rEditor(b)
-    case 'each':        return `<div class="fx-each fx-each-${b.variant||'list'}" data-fx-each="${esc(b.binding||'')}" data-fx-tpl="${esc(b.tpl||'')}"${b.style?` style="${b.style.replace(/,/g,';')}"`:''}>\n<div class="fx-each-empty fx-td-empty">Loading...</div></div>\n`
+    case 'each': {
+      // SSR: se a página tem dados do binding (via ~ssr), renderizar server-side
+      const _eachBinding = b.binding||''
+      const _eachData = page && page.ssrData && page.ssrData[_eachBinding.replace('@','')]
+      if (_eachData && Array.isArray(_eachData) && _eachData.length > 0) {
+        // SSR: expandir template para cada item
+        const _tpl = b.tpl||''
+        const _items = _eachData.map((item, idx) => {
+          let row = _tpl
+          // Substituir {item.campo} e {item} pelos valores reais
+          row = row.replace(/\{item\.(\w+)\}/g, (_, k) => esc(String(item[k]??'')))
+          row = row.replace(/\{item\}/g, esc(String(item??'')))
+          // Renderizar o bloco expandido
+          try { return applyMods(renderBlock(parseBlock(row)||{kind:'html',content:row}, page), {}) } catch { return '' }
+        }).join('')
+        const style = b.style ? ` style="${b.style.replace(/,/g,';')}"` : ''
+        return `<div class="fx-each fx-each-${b.variant||'list'} fx-each-ssr" data-fx-each="${esc(_eachBinding)}"${style}>${_items}</div>\n`
+      }
+      // Client-side fallback (comportamento original)
+      return `<div class="fx-each fx-each-${b.variant||'list'}" data-fx-each="${esc(_eachBinding)}" data-fx-tpl="${esc(b.tpl||'')}"${b.style?` style="${b.style.replace(/,/g,';')}"`:''}>\n<div class="fx-each-empty fx-td-empty">Loading...</div></div>\n`
+    }
     case 'if':          return `<div class="fx-if-wrap" data-fx-if="${esc(b.cond)}" style="display:none"></div>\n`
     default: return ''
   }
