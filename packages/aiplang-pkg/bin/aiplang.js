@@ -5,7 +5,7 @@ const fs   = require('fs')
 const path = require('path')
 const http = require('http')
 
-const VERSION     = '2.11.5'
+const VERSION     = '2.11.6'
 const RUNTIME_DIR = path.join(__dirname, '..', 'runtime')
 const cmd         = process.argv[2]
 const args        = process.argv.slice(3)
@@ -686,7 +686,7 @@ function generateTypes(app, srcFile) {
   }
 
   lines.push(`// ── aiplang version ──────────────────────────────────────────`)
-  lines.push(`export const AIPLANG_VERSION     = '2.11.5'`)
+  lines.push(`export const AIPLANG_VERSION     = '2.11.6'`)
   lines.push(``)
   return lines.join('\n')
 }
@@ -1561,23 +1561,34 @@ function rStatsUpgraded(b) {
   return `<div class="fx-stats">${cells}</div>\n`
 }
 
+
+// ── autoYear: substitui © YYYY por © <span data-fx-year></span> ──
+function autoYear(text) {
+  // Substitui padrões como "© 2024", "© 2025", "© 2026" ou só "©" pelo ano dinâmico
+  const replaced = esc(text).replace(/©\s*(\d{4})?/g, (_, yr) =>
+    `© <span class="fx-year">${yr||new Date().getFullYear()}</span>`
+  )
+  return replaced
+}
+
 function rFoot(b) {
+  const _yearScript = `<script>document.querySelectorAll('.fx-year').forEach(function(el){el.textContent=new Date().getFullYear()})</script>`
   let brand='', links='', note=''
   let itemIdx = 0
   for(const item of (b.items||[])) for(const f of item){
     if(f.isLink) links+=`<a href="${esc(f.path)}" class="fx-footer-link">${esc(f.label)}</a>`
     else if(itemIdx===0) { brand=`<span class="fx-footer-brand">${esc(f.text)}</span>`; itemIdx++ }
-    else note=`<span class="fx-footer-note">${esc(f.text)}</span>`
+    else note=`<span class="fx-footer-note">${autoYear(f.text)}</span>`
   }
   if(brand||links){
-    return `<footer class="fx-footer"><div class="fx-footer-inner">${brand}<div class="fx-footer-links">${links}</div>${note}</div></footer>
+    return `<footer class="fx-footer"><div class="fx-footer-inner">${brand}<div class="fx-footer-links">${links}</div>${note}</div></footer>${_yearScript}
 `
   }
   // fallback centrado
   let inner=''
   for(const item of (b.items||[])) for(const f of item){
     if(f.isLink) inner+=`<a href="${esc(f.path)}" class="fx-footer-link">${esc(f.label)}</a>`
-    else inner+=`<p class="fx-footer-text">${esc(f.text)}</p>`
+    else inner+=`<p class="fx-footer-text">${autoYear(f.text)}</p>`
   }
   return `<footer class="fx-footer">${inner}</footer>
 `
@@ -1746,6 +1757,7 @@ function css(theme) {
 .fx-footer-brand{font-size:1rem;font-weight:800;letter-spacing:-.02em}
 .fx-footer-links{display:flex;gap:1.5rem;flex-wrap:wrap}
 .fx-footer-note{font-size:.72rem;opacity:.3;font-family:monospace}
+.fx-year{font-variant-numeric:tabular-nums}
 .fx-hero-minimal{min-height:50vh!important}
 .fx-hero-minimal .fx-hero-inner{gap:1rem}
 .fx-hero-tall{min-height:98vh!important}
