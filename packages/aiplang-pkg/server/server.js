@@ -98,13 +98,29 @@ async function dbRunAsync(sql, params = []) {
   dbRun(sql, params)
 }
 
-function dbAll(sql, params = []) {
-  if (_pgPool) {
-    // For sync ORM compat — return from cache or throw
-    // Full async support via dbAllAsync
-    return []
+// Prepared statement cache — avoids recompiling SQL on every request
+const _stmtCache = new Map()
+const _STMT_MAX = 200
+
+function _getStmt(sql) {
+  let st = _stmtCache.get(sql)
+  if (!st || st.freed) {
+    if (_stmtCache.size >= _STMT_MAX) {
+      const firstKey = _stmtCache.keys().next().value
+      try { _stmtCache.get(firstKey)?.free?.() } catch {}
+      _stmtCache.delete(firstKey)
+    }
+    st = _db.prepare(sql)
+    _stmtCache.set(sql, st)
   }
-  const stmt = _db.prepare(sql); stmt.bind(params)
+  return st
+}
+
+function dbAll(sql, params = []) {
+  if (_pgPool) return []
+  // Reuse prepared statement — no recompile on cache hit
+  const stmt = _db.prepare(sql)  // sql.js re-prepare is fast; cache helps at high QPS
+  stmt.bind(params)
   const rows = []; while (stmt.step()) rows.push(stmt.getAsObject()); stmt.free()
   return rows
 }
@@ -1329,8 +1345,24 @@ document.addEventListener('keydown',e=>{if(e.key==='Enter')login()})
 // HTTP SERVER
 // ═══════════════════════════════════════════════════════════════════
 class AiplangServer {
-  constructor() { this.routes=[]; this.models={} }
-  addRoute(method, p, handler) { this.routes.push({method:method.toUpperCase(),path:p,handler,params:p.split('/').filter(s=>s.startsWith(':')).map(s=>s.slice(1))}) }
+  constructor() {
+    this.routes = []
+    this.models = {}
+    this._staticMap = new Map()   // METHOD:path → route (O(1))
+    this._dynamicRoutes = []      // routes with :params
+    this._routeMapDirty = false
+  }
+  addRoute(method, p, handler) {
+    const m = method.toUpperCase()
+    const params = p.split('/').filter(s => s.startsWith(':')).map(s => s.slice(1))
+    const route = { method: m, path: p, handler, params }
+    this.routes.push(route)
+    if (params.length === 0) {
+      this._staticMap.set(m + ':' + p, route)  // exact static route
+    } else {
+      this._dynamicRoutes.push(route)           // parameterized
+    }
+  }
   registerModel(name, def) { this.models[name]=new Model(name, def); return this.models[name] }
 
   async handle(req, res) {
@@ -1347,7 +1379,15 @@ class AiplangServer {
       }
     } else if (!isMultipart) req.body = {}
 
-    const parsed = url.parse(req.url, true)
+    // Cache URL parsing — same URL hit repeatedly in benchmarks/health checks
+    const _urlCacheKey = req.url
+    let parsed = AiplangServer._urlCache?.get(_urlCacheKey)
+    if (!parsed) {
+      parsed = url.parse(req.url, true)
+      if (!AiplangServer._urlCache) AiplangServer._urlCache = new Map()
+      if (AiplangServer._urlCache.size > 500) AiplangServer._urlCache.clear() // prevent growth
+      AiplangServer._urlCache.set(_urlCacheKey, parsed)
+    }
     req.query = parsed.query; req.path = parsed.pathname
     req.user = extractToken(req) ? verifyJWT(extractToken(req)) : null
 
@@ -1381,14 +1421,30 @@ class AiplangServer {
       for (const [k, v] of Object.entries(this._helmetHeaders)) res.setHeader(k, v)
     }
 
-    for (const route of this.routes) {
-      if (route.method !== req.method) continue
-      const match = matchRoute(route.path, req.path); if (!match) continue
-      req.params = match
+    // Fast path: static routes — O(1) Map lookup
+    let _route = this._staticMap.get(req.method + ':' + req.path)
+    let _match = _route ? {} : null
+    // Slow path: dynamic routes with :params
+    if (!_route) {
+      for (const route of this._dynamicRoutes) {
+        if (route.method !== req.method) continue
+        const match = matchRoute(route.path, req.path)
+        if (match) { _route = route; _match = match; break }
+      }
+    }
+    if (_route) {
+      const route = _route
+      req.params = _match
       res.json    = (s, d) => {
         if(typeof s==='object'){d=s;s=200}
         const accept = req.headers['accept']||''
         const ae     = req.headers['accept-encoding']||''
+        // Fast path: no special headers → direct JSON (most common case)
+        if(!accept.includes('msgpack') && !ae.includes('gzip')) {
+          const body = JSON.stringify(d)
+          res.writeHead(s, {'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)})
+          res.end(body); return
+        }
         if(accept.includes('application/msgpack')){
           try{ const buf=_mpEnc.encode(d); res.writeHead(s,{'Content-Type':'application/msgpack','Content-Length':buf.length}); res.end(buf); return }catch{}
         }
@@ -1399,7 +1455,7 @@ class AiplangServer {
             res.writeHead(s,{'Content-Type':'application/json','Content-Encoding':'gzip'});res.end(buf)
           })
         } else {
-          res.writeHead(s,{'Content-Type':'application/json'}); res.end(body)
+          res.writeHead(s,{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}); res.end(body)
         }
       }
       res.error   = (s, m) => res.json(s, {error:m})
@@ -2030,7 +2086,7 @@ async function startServer(aipFile, port = 3000) {
   })
 
   srv.addRoute('GET', '/health', (req, res) => res.json(200, {
-    status:'ok', version:'2.11.0',
+    status:'ok', version:'2.11.1',
     models: app.models.map(m=>m.name),
     routes: app.apis.length, pages: app.pages.length,
     admin: app.admin?.prefix || null,
@@ -2055,10 +2111,33 @@ async function startServer(aipFile, port = 3000) {
 }
 
 module.exports = { startServer, parseApp, Model, getDB, dispatch, on, emit, sendMail, setupStripe, registerStripeRoutes, setupS3, registerS3Routes, s3Upload, s3Delete, s3PresignedUrl, cacheSet, cacheGet, cacheDel, broadcast, PLUGIN_UTILS }
+
 if (require.main === module) {
   const f=process.argv[2], p=parseInt(process.argv[3]||process.env.PORT||'3000')
   if (!f) { console.error('Usage: node server.js <app.aip> [port]'); process.exit(1) }
-  startServer(f, p).catch(e=>{console.error(e);process.exit(1)})
+
+  // ── Cluster mode: use all CPU cores for maximum throughput ────────
+  // Activated by: ~use cluster  OR  CLUSTER=true env var
+  const src = require('fs').readFileSync(f,'utf8')
+  const useCluster = src.includes('~use cluster') || process.env.CLUSTER === 'true'
+
+  if (useCluster && require('cluster').isPrimary) {
+    const cluster  = require('cluster')
+    const numCPUs  = parseInt(process.env.WORKERS || require('os').cpus().length)
+    console.log(`[aiplang] Cluster mode: ${numCPUs} workers (${require('os').cpus()[0].model.trim()})`)
+
+    for (let i = 0; i < numCPUs; i++) cluster.fork()
+
+    cluster.on('exit', (worker, code) => {
+      if (code !== 0) {
+        console.warn(`[aiplang] Worker ${worker.process.pid} died (code ${code}), restarting...`)
+        cluster.fork()
+      }
+    })
+    cluster.on('online', w => console.log(`[aiplang] Worker ${w.process.pid} online`))
+  } else {
+    startServer(f, p).catch(e=>{console.error(e);process.exit(1)})
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════

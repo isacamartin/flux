@@ -5,7 +5,7 @@ const fs   = require('fs')
 const path = require('path')
 const http = require('http')
 
-const VERSION     = '2.11.0'
+const VERSION     = '2.11.1'
 const RUNTIME_DIR = path.join(__dirname, '..', 'runtime')
 const cmd         = process.argv[2]
 const args        = process.argv.slice(3)
