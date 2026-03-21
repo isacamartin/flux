@@ -1,1451 +1,1143 @@
 
-
-(function () {
-'use strict'
-
-const cfg = window.__AIPLANG_PAGE__
-if (!cfg) return
-
-const _STORE_KEY = 'aiplang_store_v1'
-const _globalStore = (() => {
-  try { return JSON.parse(sessionStorage.getItem(_STORE_KEY) || '{}') } catch { return {} }
-})()
-function syncStore(key, value) {
-  _globalStore[key] = value
-  try { sessionStorage.setItem(_STORE_KEY, JSON.stringify(_globalStore)) } catch(_e) { if(typeof console !== 'undefined') console.debug('[aiplang]',_e?.message) }
-  try { new BroadcastChannel(_STORE_KEY).postMessage({ key, value }) } catch(_e) { if(typeof console !== 'undefined') console.debug('[aiplang]',_e?.message) }
-}
-
-const _state = {}
-const _watchers = {}
-const _storeKeys = new Set((cfg.stores || []).map(s => s.key))
-
-const _boot = { ...(window.__SSR_DATA__ || {}), ..._globalStore }
-for (const [k, v] of Object.entries({ ...(cfg.state || {}), ..._boot })) {
-  try { _state[k] = typeof v === 'string' && (v.startsWith('[') || v.startsWith('{') || v === 'true' || v === 'false' || !isNaN(v)) ? JSON.parse(v) : v } catch { _state[k] = v }
-}
-
-function get(key) { return _state[key] }
-
-function set(key, value, _persist) {
-
-  const old = _state[key]
-  if (old === value) return
-  if (typeof value !== 'object' && old === value) return
-  if (typeof value === 'object' && value !== null && typeof old === 'object' && old !== null) {
-
-    if (Array.isArray(value) && Array.isArray(old) && value.length !== old.length) {
-
-    } else if (JSON.stringify(old) === JSON.stringify(value)) return
+// _fastEq: comparação rápida sem JSON.stringify (O(1) para primitivos, O(n) para arrays)
+function _fastEq(a, b) {
+  if (a === b) return true
+  if (typeof a !== typeof b) return false
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    // Verificação por comprimento + hash dos IDs (rápido para listas de dados)
+    const aId = a[0]?.id ?? a[0]?.uuid ?? JSON.stringify(a[0])
+    const bId = b[0]?.id ?? b[0]?.uuid ?? JSON.stringify(b[0])
+    const aLast = a[a.length-1]?.id ?? JSON.stringify(a[a.length-1])
+    const bLast = b[b.length-1]?.id ?? JSON.stringify(b[b.length-1])
+    return aId === bId && aLast === bLast
   }
-  _state[key] = value
-  if (_storeKeys.has(key) || _persist) syncStore(key, value)
-  notify(key)
-}
-
-try {
-  const _bc = new BroadcastChannel(_STORE_KEY)
-  _bc.onmessage = ({ data: { key, value } }) => {
-    _state[key] = value; notify(key)
+  if (a && b && typeof a === 'object') {
+    const ak = Object.keys(a), bk = Object.keys(b)
+    if (ak.length !== bk.length) return false
+    return ak.every(k => a[k] === b[k])
   }
-} catch(_e) { if(typeof console !== 'undefined') console.debug('[aiplang]',_e?.message) }
-
-function watch(key, cb) {
-  if (!_watchers[key]) _watchers[key] = []
-  _watchers[key].push(cb)
-  return () => { _watchers[key] = _watchers[key].filter(f => f !== cb) }
+  return false
 }
 
-const _pending = new Set()
-let _batchScheduled = false
-let _batchMode = 'raf' // 'raf' for animations, 'micro' for data updates
 
-function flushBatch() {
-  _batchScheduled = false
-  const keys = [..._pending]
-  _pending.clear()
-  for (const key of keys) {
-    ;(_watchers[key] || []).forEach(cb => cb(_state[key]))
+// _safeFilter: substitui new Function() — suporta field==val, field>val, field.includes(val)
+function _safeFilter(expr) {
+  return function(item) {
+    try {
+      // Suportar: item.field === 'val', item.field > 5, item.field.includes('x')
+      const cleaned = expr.trim()
+      // Operadores simples: field op value
+      let m
+      if ((m = cleaned.match(/^item\.(\w+)\s*===?\s*['"]([^'"]+)['"]$/)))  return String(item[m[1]]) === m[2]
+      if ((m = cleaned.match(/^item\.(\w+)\s*!==?\s*['"]([^'"]+)['"]$/))) return String(item[m[1]]) !== m[2]
+      if ((m = cleaned.match(/^item\.(\w+)\s*>\s*([\d.]+)$/)))            return Number(item[m[1]]) > Number(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)\s*>=\s*([\d.]+)$/)))           return Number(item[m[1]]) >= Number(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)\s*<\s*([\d.]+)$/)))            return Number(item[m[1]]) < Number(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)\s*<=\s*([\d.]+)$/)))           return Number(item[m[1]]) <= Number(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)\.includes\(['"]([^'"]+)['"]\)$/))) return String(item[m[1]]||'').includes(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)$/)))                            return !!item[m[1]]
+      return true // expressão não reconhecida → não filtrar
+    } catch { return true }
   }
 }
 
-function notify(key) {
-  _pending.add(key)
-  if (!_batchScheduled) {
-    _batchScheduled = true
+/**
+ * aiplang-runtime.js — aiplang Runtime v2.1
+ * Reactive state + SPA routing + DOM engine + query engine
+ * Zero dependencies. ~28KB unminified.
+ */
 
-    Promise.resolve().then(() => {
-      if (_batchScheduled) requestAnimationFrame(flushBatch)
+const AIPLANG = (() => {
+
+// ─────────────────────────────────────────────────────────────
+// ICONS
+// ─────────────────────────────────────────────────────────────
+
+const ICONS = {
+  bolt:'⚡',leaf:'🌱',map:'🗺',chart:'📊',lock:'🔒',star:'⭐',
+  heart:'❤',check:'✓',alert:'⚠',user:'👤',car:'🚗',money:'💰',
+  phone:'📱',shield:'🛡',fire:'🔥',rocket:'🚀',clock:'🕐',
+  globe:'🌐',gear:'⚙',pin:'📍',flash:'⚡',eye:'◉',tag:'◈',
+  plus:'+',minus:'−',edit:'✎',trash:'🗑',search:'⌕',bell:'🔔',
+  home:'⌂',mail:'✉',download:'↓',upload:'↑',link:'⛓',
+}
+
+// ─────────────────────────────────────────────────────────────
+// REACTIVE STATE
+// ─────────────────────────────────────────────────────────────
+
+class State {
+  constructor() {
+    this._data = {}
+    this._computed = {}
+    this._watchers = {}   // key → Set of callbacks
+    this._batching = false
+    this._dirty = new Set()
+  }
+
+  set(key, value) {
+    const old = this._data[key]
+    if (JSON.stringify(old) === JSON.stringify(value)) return
+    this._data[key] = value
+    if (this._batching) {
+      this._dirty.add(key)
+    } else {
+      this._notify(key)
+      this._recompute()
+    }
+  }
+
+  get(key) {
+    return this._data[key]
+  }
+
+  // Evaluate expression against current state
+  // Supports: @var, @var.field, @var.length, simple JS
+  eval(expr) {
+    if (!expr) return undefined
+    expr = expr.trim()
+
+    // Simple @var lookup
+    if (expr.startsWith('@')) {
+      const path = expr.slice(1).split('.')
+      let val = this._data[path[0]]
+      for (let i = 1; i < path.length; i++) {
+        if (val == null) return undefined
+        val = val[path[i]]
+      }
+      return val
+    }
+
+    // $computed
+    if (expr.startsWith('$')) {
+      return this._computed[expr.slice(1)]
+    }
+
+    // Template string with @bindings: "Hello {@user.name}"
+    if (expr.includes('{@') || expr.includes('{$')) {
+      return expr.replace(/\{[@$][^}]+\}/g, m => {
+        const inner = m.slice(1, -1)
+        const v = this.eval(inner)
+        return v == null ? '' : v
+      })
+    }
+
+    return expr
+  }
+
+  // Resolve bindings in a string: "Hello @user.name" or plain text
+  resolve(str) {
+    if (!str) return ''
+    if (!str.includes('@') && !str.includes('$')) return str
+    return str.replace(/[@$][a-zA-Z_][a-zA-Z0-9_.[\]]*/g, m => {
+      const v = this.eval(m)
+      return v == null ? '' : String(v)
     })
   }
-}
 
-function notifySync(key) {
-  ;(_watchers[key] || []).forEach(cb => cb(_state[key]))
-}
-
-function resolve(str) {
-  if (!str || (!str.includes('@') && !str.includes('$'))) return str
-  return str.replace(/[@$][a-zA-Z_][a-zA-Z0-9_.]*/g, m => {
-    const path = m.slice(1).split('.')
-    let val = _state[path[0]]
-    for (let i = 1; i < path.length; i++) val = val?.[path[i]]
-    return val == null ? '' : String(val)
-  })
-}
-
-function resolvePath(tmpl, row) {
-  return tmpl.replace(/\{([^}]+)\}/g, (_, k) => row?.[k] ?? get(k) ?? '')
-}
-
-const _intervals = []
-
-const _sid = Math.random().toString(36).slice(2)
-
-async function runQuery(q) {
-  const path = resolve(q.path)
-  const isGet = (q.method || 'GET').toUpperCase() === 'GET'
-  const opts = {
-    method: q.method || 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/msgpack, application/json',
-      'x-session-id': _sid
-    }
+  defineComputed(name, expr) {
+    this._computed[name] = null
+    this._computedExprs = this._computedExprs || {}
+    this._computedExprs[name] = expr
+    this._recompute()
   }
 
-  if (isGet && q._deltaReady) opts.headers['x-aiplang-delta'] = '1'
-  if (q.body) opts.body = JSON.stringify(q.body)
-  try {
-    const res = await fetch(path, opts)
-
-    if (res.status === 304) { q._deltaReady = true; return get(q.target?.replace(/^@/,'')) || null }
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    const ct = res.headers.get('Content-Type') || ''
-    let data
-    if (ct.includes('msgpack')) {
-      const buf = await res.arrayBuffer()
-      data = _mp.decode(new Uint8Array(buf))
-    } else {
-      data = await res.json()
-    }
-
-    if (data && data.__delta) {
-      const key = q.target ? q.target.replace(/^@/, '') : null
-      if (key) {
-        const current = [...(get(key) || [])]
-
-        for (const row of (data.changed || [])) {
-          const idx = current.findIndex(r => r.id === row.id)
-          if (idx >= 0) current[idx] = row; else current.push(row)
-        }
-
-        const delSet = new Set(data.deleted || [])
-        const merged = current.filter(r => !delSet.has(r.id))
-        set(key, merged)
-        q._deltaReady = true
-        return merged
-      }
-    }
-    q._deltaReady = true
-    applyAction(data, q.target, q.action)
-    return data
-  } catch (e) {
-    console.warn('[aiplang]', q.method, path, e.message)
-    return null
-  }
-}
-
-function applyAction(data, target, action) {
-  if (!target && !action) return
-  if (action) {
-    if (action.startsWith('redirect ')) { window.location.href = action.slice(9).trim(); return }
-    if (action === 'reload')            { window.location.reload(); return }
-    const pm = action.match(/^@([a-zA-Z_]+)\.push\(\$result\)$/)
-    if (pm) { set(pm[1], [...(get(pm[1]) || []), data]); return }
-    const fm = action.match(/^@([a-zA-Z_]+)\.filter\((.+)\)$/)
-    if (fm) {
-
+  _recompute() {
+    // Safe computed: only supports @var.path expressions, no arbitrary code
+    if (!this._computedExprs) return
+    for (const [name, expr] of Object.entries(this._computedExprs)) {
       try {
-        const expr = fm[2].trim()
-        const filtered = (get(fm[1]) || []).filter(item => {
+        const val = this.eval(expr.trim())
+        if (JSON.stringify(this._computed[name]) !== JSON.stringify(val)) {
+          this._computed[name] = val
+          this._notify('$'+name)
+        }
+      } catch(e) {}
+    }
+  }
 
-          const eq = expr.match(/^([a-zA-Z_.]+)\s*(!?=)\s*(.+)$/)
-          if (eq) {
-            const [, field, op, val] = eq
-            const parts = field.split('.')
-            let v = item
-            for (const p of parts) v = v?.[p]
-            const strV = String(v ?? '')
-            return op === '!=' ? strV !== val.trim() : strV === val.trim()
+  watch(key, cb) {
+    if (!this._watchers[key]) this._watchers[key] = new Set()
+    this._watchers[key].add(cb)
+    return () => this._watchers[key].delete(cb)
+  }
+
+  _notify(key) {
+    if (this._watchers[key]) {
+      for (const cb of this._watchers[key]) cb(this._data[key])
+    }
+    // Wildcard watchers
+    if (this._watchers['*']) {
+      for (const cb of this._watchers['*']) cb(key, this._data[key])
+    }
+  }
+
+  batch(fn) {
+    this._batching = true
+    fn()
+    this._batching = false
+    for (const key of this._dirty) this._notify(key)
+    this._dirty.clear()
+    this._recompute()
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// QUERY ENGINE
+// ─────────────────────────────────────────────────────────────
+
+class QueryEngine {
+  constructor(state) {
+    this.state = state
+    this.intervals = []
+  }
+
+  async run(q) {
+    // q = { method, path, target, action, body }
+    const path = this.state.resolve(q.path)
+    const opts = { method: q.method, headers: { 'Content-Type': 'application/json' } }
+    if (q.body) opts.body = JSON.stringify(q.body)
+
+    try {
+      const res = await fetch(path, opts)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      this._applyResult(data, q.target, q.action)
+      return data
+    } catch (e) {
+      console.warn('[aiplang] query failed:', q.method, path, e.message)
+      return null
+    }
+  }
+
+  _applyResult(data, target, action) {
+    if (!target && !action) return
+    const state = this.state
+
+    if (action) {
+      // action: "redirect /path" | "@var = $result" | "@list.push($result)"
+      if (action.startsWith('redirect ')) {
+        Router.push(action.slice(9).trim())
+        return
+      }
+      if (action.startsWith('reload')) {
+        window.location.reload()
+        return
+      }
+      // @list.push($result)
+      const pushMatch = action.match(/^@([a-zA-Z_]+)\.push\(\$result\)$/)
+      if (pushMatch) {
+        const arr = state.get(pushMatch[1]) || []
+        state.set(pushMatch[1], [...arr, data])
+        return
+      }
+      // @list.filter(...)
+      const filterMatch = action.match(/^@([a-zA-Z_]+)\s*=\s*@\1\.filter\((.+)\)$/)
+      if (filterMatch) {
+        const arr = state.get(filterMatch[1]) || []
+        try {
+          // Seguro: eval substituído por parser de expressão simples
+          const _fexpr = filterMatch[2]
+          const fn = _safeFilter(_fexpr)
+          state.set(filterMatch[1], arr.filter(fn))
+        } catch(e) {}
+        return
+      }
+      // @var = $result
+      const assignMatch = action.match(/^@([a-zA-Z_]+)\s*=\s*\$result$/)
+      if (assignMatch) {
+        state.set(assignMatch[1], data)
+        return
+      }
+    }
+
+    if (target) {
+      // target: "@varname"
+      if (target.startsWith('@')) {
+        state.set(target.slice(1), data)
+      }
+    }
+  }
+
+  mountAll(queries) {
+    for (const q of queries) {
+      if (q.trigger === 'mount') {
+        this.run(q)
+      } else if (q.trigger === 'interval') {
+        this.run(q)
+        const id = setInterval(() => this.run(q), q.interval)
+        this.intervals.push(id)
+      }
+    }
+  }
+
+  destroy() {
+    for (const id of this.intervals) clearInterval(id)
+    this.intervals = []
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// PARSER
+// ─────────────────────────────────────────────────────────────
+
+function parseFlux(src) {
+  // Split into pages by --- separator
+  const pageSections = src.split(/^---$/m)
+  return pageSections.map(section => parsePage(section.trim())).filter(p => p)
+}
+
+function parsePage(src) {
+  const lines = src.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+  if (!lines.length) return null
+
+  const page = {
+    id: 'page',
+    theme: 'dark',
+    route: '/',
+    state: {},      // @var = value
+    computed: {},   // $var = expr
+    queries: [],    // ~mount / ~interval
+    blocks: [],     // nav, hero, etc.
+  }
+
+  for (const line of lines) {
+    // Meta: %id theme /route
+    if (line.startsWith('%')) {
+      const parts = line.slice(1).trim().split(/\s+/)
+      page.id    = parts[0] || 'page'
+      page.theme = parts[1] || 'dark'
+      page.route = parts[2] || '/'
+      continue
+    }
+
+    // State: @var = value
+    if (line.startsWith('@')) {
+      const eq = line.indexOf('=')
+      if (eq !== -1) {
+        const key = line.slice(1, eq).trim()
+        const val = line.slice(eq+1).trim()
+        try { page.state[key] = JSON.parse(val) }
+        catch { page.state[key] = val }
+      }
+      continue
+    }
+
+    // Computed: $var = expr
+    if (line.startsWith('$')) {
+      const eq = line.indexOf('=')
+      if (eq !== -1) {
+        const key = line.slice(1, eq).trim()
+        const expr = line.slice(eq+1).trim()
+        page.computed[key] = expr
+      }
+      continue
+    }
+
+    // Lifecycle: ~mount GET /path => @var  OR  ~mount GET /path @var
+    if (line.startsWith('~')) {
+      const q = parseQuery(line.slice(1).trim())
+      if (q) page.queries.push(q)
+      continue
+    }
+
+    // Block with state binding: table @var { ... }
+    const tableMatch = line.match(/^table\s+(@[a-zA-Z_$][a-zA-Z0-9_.]*)\s*\{(.*)/)
+    if (tableMatch) {
+      const content = tableMatch[2].endsWith('}')
+        ? tableMatch[2].slice(0, -1)
+        : tableMatch[2]
+      page.blocks.push({
+        kind: 'table',
+        binding: tableMatch[1],
+        cols: parseTableCols(content),
+        empty: parseTableEmpty(content),
+      })
+      continue
+    }
+
+    // list @var { ... }
+    const listMatch = line.match(/^list\s+(@[a-zA-Z_$][a-zA-Z0-9_.]*)\s*\{(.*)/)
+    if (listMatch) {
+      const content = listMatch[2].endsWith('}') ? listMatch[2].slice(0,-1) : listMatch[2]
+      page.blocks.push({
+        kind: 'list',
+        binding: listMatch[1],
+        fields: parseTableCols(content),
+      })
+      continue
+    }
+
+    // form METHOD /path => action { ... }
+    const formMatch = line.match(/^form\s+(GET|POST|PUT|PATCH|DELETE)\s+(\S+)(?:\s*=>\s*([^{]+))?\s*\{(.*)/)
+    if (formMatch) {
+      const content = formMatch[4].endsWith('}') ? formMatch[4].slice(0,-1) : formMatch[4]
+      page.blocks.push({
+        kind: 'form',
+        method: formMatch[1],
+        path: formMatch[2],
+        action: (formMatch[3]||'').trim(),
+        fields: parseFormFields(content),
+      })
+      continue
+    }
+
+    // if @condition { block }
+    const ifMatch = line.match(/^if\s+(!?[@$][a-zA-Z_0-9.]+)\s*\{(.*)/)
+    if (ifMatch) {
+      const content = ifMatch[2].endsWith('}') ? ifMatch[2].slice(0,-1) : ifMatch[2]
+      page.blocks.push({
+        kind: 'if',
+        condition: ifMatch[1],
+        inner: content.trim(),
+      })
+      continue
+    }
+
+    // Regular block: nav{...} hero{...} etc
+    const bi = line.indexOf('{')
+    if (bi !== -1) {
+      const head = line.slice(0, bi).trim()
+      const body = line.slice(bi+1, line.lastIndexOf('}')).trim()
+      const m = head.match(/^([a-z]+)(\d+)?$/)
+      const kind = m ? m[1] : head
+      const cols = m && m[2] ? parseInt(m[2]) : 3
+      const items = parseItems(body)
+      page.blocks.push({ kind, cols, items })
+    }
+  }
+
+  return page
+}
+
+function parseQuery(s) {
+  // "mount GET /api/users => @users"
+  // "mount GET /api/users @users"
+  // "interval 5000 GET /api/stats => @stats"
+  const parts = s.split(/\s+/)
+  if (parts[0] === 'mount') {
+    const arrowIdx = parts.indexOf('=>')
+    if (arrowIdx !== -1) {
+      return {
+        trigger: 'mount',
+        method: parts[1],
+        path: parts[2],
+        target: null,
+        action: parts.slice(arrowIdx+1).join(' ').trim(),
+      }
+    }
+    return { trigger:'mount', method:parts[1], path:parts[2], target:parts[3], action:null }
+  }
+  if (parts[0] === 'interval') {
+    const arrowIdx = parts.indexOf('=>')
+    if (arrowIdx !== -1) {
+      return {
+        trigger:'interval', interval:parseInt(parts[1]),
+        method:parts[2], path:parts[3],
+        target:null, action:parts.slice(arrowIdx+1).join(' ').trim(),
+      }
+    }
+    return { trigger:'interval', interval:parseInt(parts[1]), method:parts[2], path:parts[3], target:parts[4], action:null }
+  }
+  return null
+}
+
+function parseItems(body) {
+  return body.split('|').map(item =>
+    item.trim().split('>').map(f => {
+      f = f.trim()
+      if (f.startsWith('/')) {
+        const [path, label] = f.split(':')
+        return { isLink:true, path:path.trim(), label:(label||'').trim() }
+      }
+      return { isLink:false, text:f }
+    })
+  ).filter(i => i.length > 0 && (i[0].text || i[0].isLink))
+}
+
+function parseTableCols(s) {
+  // "Name:name | Email:email | Status:status"
+  return s.split('|')
+    .map(c => {
+      c = c.trim()
+      if (c.startsWith('empty:')) return null
+      const [label, key] = c.split(':').map(x => x.trim())
+      return key ? { label, key } : null
+    })
+    .filter(Boolean)
+}
+
+function parseTableEmpty(s) {
+  const m = s.match(/empty:\s*([^|]+)/)
+  return m ? m[1].trim() : 'No data.'
+}
+
+function parseFormFields(s) {
+  // "Name : text : placeholder | Email : email : hint"
+  return s.split('|').map(f => {
+    const parts = f.split(':').map(p => p.trim())
+    return {
+      label: parts[0],
+      type: parts[1] || 'text',
+      placeholder: parts[2] || '',
+      name: (parts[0]||'').toLowerCase().replace(/\s+/g,'_'),
+    }
+  }).filter(f => f.label)
+}
+
+// ─────────────────────────────────────────────────────────────
+// DOM RENDERER
+// ─────────────────────────────────────────────────────────────
+
+class Renderer {
+  constructor(state, container) {
+    this.state = state
+    this.container = container
+    this._cleanups = []
+  }
+
+  render(page) {
+    this.container.innerHTML = ''
+    this.container.className = `aiplang-root aiplang-theme-${page.theme}`
+    for (const block of page.blocks) {
+      const el = this.renderBlock(block)
+      if (el) this.container.appendChild(el)
+    }
+  }
+
+  renderBlock(block) {
+    switch(block.kind) {
+      case 'nav':    return this.renderNav(block)
+      case 'hero':   return this.renderHero(block)
+      case 'stats':  return this.renderStats(block)
+      case 'row':    return this.renderRow(block)
+      case 'sect':   return this.renderSect(block)
+      case 'foot':   return this.renderFoot(block)
+      case 'table':  return this.renderTable(block)
+      case 'list':   return this.renderList(block)
+      case 'form':   return this.renderForm(block)
+      case 'if':     return this.renderIf(block)
+      case 'alert':  return this.renderAlert(block)
+      default: return null
+    }
+  }
+
+  // Resolve bindings in text
+  t(str) { return this.state.resolve(str) }
+
+  // Create element helper
+  el(tag, cls, inner) {
+    const e = document.createElement(tag)
+    if (cls) e.className = cls
+    if (inner) e.innerHTML = inner
+    return e
+  }
+
+  renderNav(block) {
+    const nav = this.el('nav', 'fx-nav')
+    if (!block.items?.[0]) return nav
+    const item = block.items[0]
+    let ls = 0
+    if (!item[0]?.isLink) {
+      const brand = this.el('span', 'fx-brand')
+      brand.textContent = this.t(item[0].text)
+      nav.appendChild(brand)
+      ls = 1
+    }
+    const links = this.el('div', 'fx-nav-links')
+    for (const f of item.slice(ls)) {
+      if (f.isLink) {
+        const a = document.createElement('a')
+        a.className = 'fx-nav-link'
+        a.href = f.path
+        a.textContent = f.label
+        a.addEventListener('click', e => { e.preventDefault(); Router.push(f.path) })
+        links.appendChild(a)
+      }
+    }
+    nav.appendChild(links)
+    return nav
+  }
+
+  renderHero(block) {
+    const sec = this.el('section', 'fx-hero')
+    const inner = this.el('div', 'fx-hero-inner')
+    sec.appendChild(inner)
+    let h1 = false
+    for (const item of block.items) {
+      for (const f of item) {
+        if (f.isLink) {
+          const a = this.el('a', 'fx-cta')
+          a.href = f.path
+          a.textContent = f.label
+          a.addEventListener('click', e => { e.preventDefault(); Router.push(f.path) })
+          inner.appendChild(a)
+        } else if (!h1) {
+          const el = this.el('h1', 'fx-title')
+          el.textContent = this.t(f.text)
+          inner.appendChild(el)
+          h1 = true
+          // Reactive bind
+          if (f.text.includes('@') || f.text.includes('$')) {
+            const orig = f.text
+            const stop = this.state.watch('*', () => { el.textContent = this.t(orig) })
+            this._cleanups.push(stop)
           }
-          return true
+        } else {
+          const el = this.el('p', 'fx-sub')
+          el.textContent = this.t(f.text)
+          inner.appendChild(el)
+        }
+      }
+    }
+    return sec
+  }
+
+  renderStats(block) {
+    const wrap = this.el('div', 'fx-stats')
+    for (const item of block.items) {
+      const raw = item[0]?.text || ''
+      const [val, lbl] = raw.split(':')
+      const cell = this.el('div', 'fx-stat')
+      const valEl = this.el('div', 'fx-stat-val')
+      const lblEl = this.el('div', 'fx-stat-lbl')
+      valEl.textContent = this.t(val?.trim())
+      lblEl.textContent = this.t(lbl?.trim())
+      cell.appendChild(valEl)
+      cell.appendChild(lblEl)
+      wrap.appendChild(cell)
+      // Reactive
+      if (raw.includes('@') || raw.includes('$')) {
+        const origVal = val?.trim(), origLbl = lbl?.trim()
+        const stop = this.state.watch('*', () => {
+          valEl.textContent = this.t(origVal)
+          lblEl.textContent = this.t(origLbl)
         })
-        set(fm[1], filtered)
-      } catch(_e) { if(typeof console !== 'undefined') console.debug('[aiplang]',_e?.message) }
-      return
-    }
-    const am = action.match(/^@([a-zA-Z_]+)\s*=\s*\$result$/)
-    if (am) { set(am[1], data); return }
-  }
-  if (target && target.startsWith('@')) set(target.slice(1), data)
-}
-
-function mountQueries() {
-  for (const q of cfg.queries || []) {
-    if (q.trigger === 'mount')    { runQuery(q) }
-    else if (q.trigger === 'interval') {
-      runQuery(q)
-      _intervals.push(setInterval(() => runQuery(q), q.interval))
-    }
-  }
-}
-
-async function http(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } }
-  if (body) opts.body = JSON.stringify(body)
-  const res  = await fetch(path, opts)
-  const data = await res.json().catch(() => ({}))
-  return { ok: res.ok, status: res.status, data }
-}
-
-function toast(msg, type) {
-  const t = document.createElement('div')
-  t.textContent = msg
-  t.style.cssText = `
-    position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;
-    padding:.75rem 1.25rem;border-radius:.625rem;font-size:.8125rem;font-weight:600;
-    font-family:-apple-system,'Segoe UI',system-ui,sans-serif;
-    box-shadow:0 8px 24px rgba(0,0,0,.3);
-    transition:opacity .3s;
-    background:${type === 'ok' ? '#22c55e' : type === 'err' ? '#ef4444' : '#334155'};
-    color:#fff;
-  `
-  document.body.appendChild(t)
-  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300) }, 2500)
-}
-
-function confirm(msg) {
-  return new Promise(resolve => {
-    const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)'
-    const box = document.createElement('div')
-    box.style.cssText = 'background:#0f172a;border:1px solid #1e293b;border-radius:1rem;padding:2rem;max-width:320px;width:90%;text-align:center;font-family:-apple-system,system-ui,sans-serif'
-    box.innerHTML = `
-      <p style="color:#f1f5f9;font-size:.9375rem;margin-bottom:1.5rem;line-height:1.6">${msg}</p>
-      <div style="display:flex;gap:.75rem;justify-content:center">
-        <button id="fx-cancel" style="flex:1;padding:.75rem;border:1px solid #1e293b;background:transparent;color:#94a3b8;border-radius:.5rem;cursor:pointer;font-size:.875rem">Cancel</button>
-        <button id="fx-confirm" style="flex:1;padding:.75rem;border:none;background:#ef4444;color:#fff;border-radius:.5rem;cursor:pointer;font-size:.875rem;font-weight:700">Delete</button>
-      </div>
-    `
-    overlay.appendChild(box)
-    document.body.appendChild(overlay)
-    box.querySelector('#fx-cancel').onclick  = () => { overlay.remove(); resolve(false) }
-    box.querySelector('#fx-confirm').onclick = () => { overlay.remove(); resolve(true) }
-  })
-}
-
-function editModal(row, cols, path, method, stateKey) {
-  return new Promise(resolve => {
-    const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)'
-    const box = document.createElement('div')
-    box.style.cssText = 'background:#0f172a;border:1px solid #1e293b;border-radius:1rem;padding:2rem;max-width:400px;width:90%;font-family:-apple-system,system-ui,sans-serif'
-
-    const fields = cols.map(col => `
-      <div style="margin-bottom:1rem">
-        <label style="display:block;font-size:.8rem;color:#94a3b8;font-weight:600;margin-bottom:.4rem">${col.label}</label>
-        <input name="${col.key}" value="${row[col.key] || ''}"
-          style="width:100%;padding:.75rem 1rem;background:#020617;border:1px solid #1e293b;color:#f1f5f9;border-radius:.5rem;font-size:.875rem;outline:none;box-sizing:border-box">
-      </div>
-    `).join('')
-
-    box.innerHTML = `
-      <h3 style="color:#f1f5f9;font-size:1rem;font-weight:700;margin-bottom:1.5rem">Edit record</h3>
-      ${fields}
-      <div id="fx-edit-msg" style="font-size:.8rem;min-height:1.25rem;margin-bottom:.75rem;text-align:center"></div>
-      <div style="display:flex;gap:.75rem">
-        <button id="fx-edit-cancel" style="flex:1;padding:.75rem;border:1px solid #1e293b;background:transparent;color:#94a3b8;border-radius:.5rem;cursor:pointer;font-size:.875rem">Cancel</button>
-        <button id="fx-edit-save" style="flex:1;padding:.75rem;border:none;background:#2563eb;color:#fff;border-radius:.5rem;cursor:pointer;font-size:.875rem;font-weight:700">Save</button>
-      </div>
-    `
-    overlay.appendChild(box)
-    document.body.appendChild(overlay)
-
-    box.querySelector('#fx-edit-cancel').onclick = () => { overlay.remove(); resolve(null) }
-    box.querySelector('#fx-edit-save').onclick = async () => {
-      const btn = box.querySelector('#fx-edit-save')
-      const msg = box.querySelector('#fx-edit-msg')
-      btn.disabled = true; btn.textContent = 'Saving...'
-      const body = {}
-      box.querySelectorAll('input').forEach(inp => body[inp.name] = inp.value)
-      const { ok, data } = await http(method, resolvePath(path, row), body)
-      if (ok) {
-        overlay.remove()
-        resolve(data)
-        toast('Saved', 'ok')
-      } else {
-        msg.style.color = '#f87171'
-        msg.textContent = data.message || data.error || 'Error saving'
-        btn.disabled = false; btn.textContent = 'Save'
+        this._cleanups.push(stop)
       }
     }
-  })
-}
+    return wrap
+  }
 
-function hydrateTables() {
-  document.querySelectorAll('[data-fx-table]').forEach(tbl => {
-    const binding   = tbl.getAttribute('data-fx-table')
-    const colsJSON  = tbl.getAttribute('data-fx-cols')
-    const editPath  = tbl.getAttribute('data-fx-edit')
-    const editMethod= tbl.getAttribute('data-fx-edit-method') || 'PUT'
-    const delPath   = tbl.getAttribute('data-fx-delete')
-    const delKey    = tbl.getAttribute('data-fx-delete-key') || 'id'
+  renderRow(block) {
+    const grid = this.el('div', `fx-grid fx-grid-${block.cols || 3}`)
+    for (const item of block.items) {
+      const card = this.el('div', 'fx-card')
+      item.forEach((f, fi) => {
+        if (f.isLink) {
+          const a = this.el('a', 'fx-card-link')
+          a.href = f.path
+          a.textContent = `${f.label} →`
+          a.addEventListener('click', e => { e.preventDefault(); Router.push(f.path) })
+          card.appendChild(a)
+        } else if (fi === 0) {
+          const ico = this.el('div', 'fx-icon')
+          ico.textContent = ICONS[f.text] || f.text
+          card.appendChild(ico)
+        } else if (fi === 1) {
+          const h = this.el('h3', 'fx-card-title')
+          h.textContent = this.t(f.text)
+          card.appendChild(h)
+        } else {
+          const p = this.el('p', 'fx-card-body')
+          p.textContent = this.t(f.text)
+          card.appendChild(p)
+        }
+      })
+      grid.appendChild(card)
+    }
+    return grid
+  }
 
-    const cols  = colsJSON ? JSON.parse(colsJSON) : []
-    const tbody = tbl.querySelector('tbody')
-    if (!tbody) return
+  renderSect(block) {
+    const sec = this.el('section', 'fx-sect')
+    block.items.forEach((item, ii) => {
+      for (const f of item) {
+        if (f.isLink) {
+          const a = this.el('a', 'fx-sect-link')
+          a.href = f.path; a.textContent = f.label
+          a.addEventListener('click', e => { e.preventDefault(); Router.push(f.path) })
+          sec.appendChild(a)
+        } else if (ii === 0) {
+          const h = this.el('h2', 'fx-sect-title')
+          h.textContent = this.t(f.text)
+          sec.appendChild(h)
+        } else {
+          const p = this.el('p', 'fx-sect-body')
+          p.textContent = this.t(f.text)
+          sec.appendChild(p)
+        }
+      }
+    })
+    return sec
+  }
 
-    if ((editPath || delPath) && tbl.querySelector('thead tr')) {
-      const thead = tbl.querySelector('thead tr')
-      if (!thead.querySelector('.fx-th-actions')) {
-        const th = document.createElement('th')
-        th.className = 'fx-th fx-th-actions'
-        th.textContent = 'Actions'
-        thead.appendChild(th)
+  renderFoot(block) {
+    const foot = this.el('footer', 'fx-footer')
+    for (const item of block.items) {
+      for (const f of item) {
+        if (f.isLink) {
+          const a = this.el('a', 'fx-footer-link')
+          a.href = f.path; a.textContent = f.label
+          foot.appendChild(a)
+        } else {
+          const p = this.el('p', 'fx-footer-text')
+          p.textContent = this.t(f.text)
+          foot.appendChild(p)
+        }
       }
     }
+    return foot
+  }
 
-    const _rowCache = new Map()
-    const _colKeys = cols.map(c => c.key)
-    let _initialized = false
-
-    const renderRow = (row, idx) => {
-
+  renderTable(block) {
+    const wrap = this.el('div', 'fx-table-wrap')
+    const table = document.createElement('table')
+    table.className = 'fx-table'
+    const thead = document.createElement('thead')
+    const tr = document.createElement('tr')
+    tr.className = 'fx-thead-row'
+    for (const col of block.cols) {
+      const th = document.createElement('th')
+      th.className = 'fx-th'
+      th.textContent = col.label
+      tr.appendChild(th)
     }
+    thead.appendChild(tr)
+    table.appendChild(thead)
+    const tbody = document.createElement('tbody')
+    tbody.className = 'fx-tbody'
+    table.appendChild(tbody)
+    wrap.appendChild(table)
 
     const render = () => {
-      const key  = binding.startsWith('@') ? binding.slice(1) : binding
-      let rows   = get(key)
+      let rows = this.state.eval(block.binding)
       if (!Array.isArray(rows)) rows = []
-
-      if (!rows.length) {
-        tbody.innerHTML = ''
-        _rowCache.clear()
-        _initialized = false
+      tbody.innerHTML = ''
+      if (rows.length === 0) {
         const tr = document.createElement('tr')
         const td = document.createElement('td')
-        td.colSpan = cols.length + (editPath || delPath ? 1 : 0)
+        td.colSpan = block.cols.length
         td.className = 'fx-td-empty'
-        td.textContent = tbl.getAttribute('data-fx-empty') || 'No data.'
-        tr.appendChild(td); tbody.appendChild(tr)
+        td.textContent = block.empty || 'No data.'
+        tr.appendChild(td)
+        tbody.appendChild(tr)
         return
       }
-
-      const VIRTUAL_THRESHOLD = 80
-      const OVERSCAN = 8
-      const colSpanTotal = cols.length + (editPath || delPath ? 1 : 0)
-      const useVirtual = rows.length >= VIRTUAL_THRESHOLD
-      let rowHeights = null, totalHeight = 0, scrollListener = null
-
-      if (useVirtual) {
-        const wrapDiv = tbl.closest('.fx-table-wrap') || tbl.parentElement
-        wrapDiv.style.cssText += ';max-height:520px;overflow-y:auto;position:relative'
-
-        const measureRow = rows[0]
-        const tempTr = document.createElement('tr')
-        tempTr.style.visibility = 'hidden'
-        cols.forEach(col => {
-          const td = document.createElement('td'); td.className = 'fx-td'
-          td.textContent = measureRow[col.key] || ''; tempTr.appendChild(td)
-        })
-        tbody.appendChild(tempTr)
-        const rowH = Math.max(tempTr.getBoundingClientRect().height, 40) || 44
-        tbody.removeChild(tempTr)
-
-        const viewH = wrapDiv.clientHeight || 480
-        const visibleCount = Math.ceil(viewH / rowH) + OVERSCAN * 2
-
-        const renderVirtual = () => {
-          const scrollTop = wrapDiv.scrollTop
-          const startRaw = Math.floor(scrollTop / rowH)
-          const start = Math.max(0, startRaw - OVERSCAN)
-          const end   = Math.min(rows.length - 1, start + visibleCount)
-          const paddingTop = start * rowH
-          const paddingBot = Math.max(0, (rows.length - end - 1) * rowH)
-
-          tbody.innerHTML = ''
-
-          if (paddingTop > 0) {
-            const tr = document.createElement('tr')
-            const td = document.createElement('td')
-            td.colSpan = colSpanTotal; td.style.cssText = 'height:'+paddingTop+'px;padding:0;border:none'
-            tr.appendChild(td); tbody.appendChild(tr)
-          }
-
-          for (let i = start; i <= end; i++) renderRow(rows[i], i)
-
-          if (paddingBot > 0) {
-            const tr = document.createElement('tr')
-            const td = document.createElement('td')
-            td.colSpan = colSpanTotal; td.style.cssText = 'height:'+paddingBot+'px;padding:0;border:none'
-            tr.appendChild(td); tbody.appendChild(tr)
-          }
-        }
-
-        let rafPending = false
-        scrollListener = () => {
-          if (rafPending) return; rafPending = true
-          requestAnimationFrame(() => { rafPending = false; renderVirtual() })
-        }
-        wrapDiv.addEventListener('scroll', scrollListener, { passive: true })
-        renderVirtual()
-        return
-      }
-
-      function renderRow(row, idx) {
+      for (const row of rows) {
         const tr = document.createElement('tr')
         tr.className = 'fx-tr'
-
-        for (const col of cols) {
+        for (const col of block.cols) {
           const td = document.createElement('td')
           td.className = 'fx-td'
           td.textContent = row[col.key] != null ? row[col.key] : ''
           tr.appendChild(td)
         }
-
-        if (editPath || delPath) {
-          const td = document.createElement('td')
-          td.className = 'fx-td fx-td-actions'
-          td.style.cssText = 'white-space:nowrap'
-
-          if (editPath) {
-            const btn = document.createElement('button')
-            btn.className = 'fx-action-btn fx-edit-btn'
-            btn.textContent = '✎ Edit'
-            btn.onclick = async () => {
-              const updated = await editModal(row, cols, editPath, editMethod, binding.slice(1))
-              if (!updated) return
-              const key = binding.slice(1)
-              const arr = [...(get(key) || [])]
-              arr[idx] = { ...row, ...updated }
-              set(key, arr)
-            }
-            td.appendChild(btn)
-          }
-
-          if (delPath) {
-            const btn = document.createElement('button')
-            btn.className = 'fx-action-btn fx-delete-btn'
-            btn.textContent = '✕ Delete'
-            btn.onclick = async () => {
-              const ok = await confirm('Delete this record? This cannot be undone.')
-              if (!ok) return
-              const path = resolvePath(delPath, row)
-              const { ok: success, data } = await http('DELETE', path, null)
-              if (success) {
-                const key = binding.slice(1)
-                set(key, (get(key) || []).filter((_, i) => i !== idx))
-                toast('Deleted', 'ok')
-              } else {
-                toast(data.message || 'Error deleting', 'err')
-              }
-            }
-            td.appendChild(btn)
-          }
-
-          tr.appendChild(td)
-        }
         tbody.appendChild(tr)
-      }
-
-      if (!_initialized) {
-
-        _initialized = true
-        tbody.innerHTML = ''
-        const frag = document.createDocumentFragment()
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i]
-          const tr = document.createElement('tr')
-          tr.className = 'fx-tr'
-          tr.dataset.id = row.id || i
-
-          for (const col of cols) {
-            const td = document.createElement('td')
-            td.className = 'fx-td'
-            td.textContent = row[col.key] != null ? row[col.key] : ''
-            tr.appendChild(td)
-          }
-
-          if (editPath || delPath) {
-            const actTd = document.createElement('td')
-            actTd.className = 'fx-td fx-td-actions'
-            actTd.style.cssText = 'white-space:nowrap'
-            if (editPath) {
-              const eb = document.createElement('button')
-              eb.className = 'fx-action-btn fx-edit-btn'; eb.textContent = '✎ Edit'
-              const _row = row, _i = i
-              eb.onclick = async () => {
-                const upd = await editModal(_row, cols, editPath, editMethod, key)
-                if (!upd) return
-                const arr = [...(get(key)||[])]; arr[_i]={..._row,...upd}; set(key, arr)
-              }
-              actTd.appendChild(eb)
-            }
-            if (delPath) {
-              const db = document.createElement('button')
-              db.className = 'fx-action-btn fx-delete-btn'; db.textContent = '✕ Delete'
-              const _row = row, _i = i
-              db.onclick = async () => {
-                if (!await confirm('Delete this record? This cannot be undone.')) return
-                const {ok,data} = await http('DELETE', resolvePath(delPath,_row), null)
-                if (ok) { const _dtr=db.closest('tr');_animateExit(_dtr,'fx-exit',()=>set(key,(get(key)||[]).filter((_,j)=>j!==_i)));toast('Deleted','ok') }
-                else toast(data.message||'Error deleting','err')
-              }
-              actTd.appendChild(db)
-            }
-            tr.appendChild(actTd)
-          }
-
-          _rowCache.set(row.id != null ? row.id : i, {
-            vals: _colKeys.map(k => row[k]),
-            tr
-          })
-          frag.appendChild(tr)
-        }
-        tbody.appendChild(frag)
-
-        try {
-          const tc = _buildTypedCache(rows, _colKeys)
-          _rowCache._typed = tc
-
-          const compiledInit = window['__aip_init_' + stateKey]
-          if (compiledInit) {
-            _rowCache._compiled   = compiledInit(rows)
-            _rowCache._compiled_n = rows.length
-            _rowCache._ids        = rows.map(r => r.id != null ? r.id : null)
-          }
-        } catch(_e) { if(typeof console !== 'undefined') console.debug('[aiplang]',_e?.message) }
-      } else {
-
-        const _makeRow = (row, idx) => {
-          const tr = document.createElement('tr')
-          tr.className = 'fx-tr'; tr.dataset.id = row.id != null ? row.id : idx
-          for (const col of cols) {
-            const td = document.createElement('td'); td.className = 'fx-td'
-            td.textContent = row[col.key] != null ? row[col.key] : ''; tr.appendChild(td)
-          }
-          if (editPath || delPath) {
-            const actTd = document.createElement('td')
-            actTd.className = 'fx-td fx-td-actions'; actTd.style.cssText = 'white-space:nowrap'
-            if (editPath) { const eb=document.createElement('button');eb.className='fx-action-btn fx-edit-btn';eb.textContent='✎ Edit';const _r=row,_i=idx;eb.onclick=async()=>{const upd=await editModal(_r,cols,editPath,editMethod,key);if(!upd)return;const arr=[...(get(key)||[])];arr[_i]={..._r,...upd};set(key,arr)};actTd.appendChild(eb) }
-            if (delPath) { const db=document.createElement('button');db.className='fx-action-btn fx-delete-btn';db.textContent='✕ Delete';const _r=row,_i=idx;db.onclick=async()=>{if(!await confirm('Delete?'))return;const{ok,data}=await http('DELETE',resolvePath(delPath,_r),null);if(ok){const _dtr2=db.closest('tr');_animateExit(_dtr2,'fx-exit',()=>set(key,(get(key)||[]).filter((_,j)=>j!==_i)));toast('Deleted','ok')}else toast(data.message||'Error','err')};actTd.appendChild(db) }
-            tr.appendChild(actTd)
-          }
-          return tr
-        }
-
-        const _applyResult = ({ patches, inserts, deletes }) => {
-          for (const { id, col, val } of patches) {
-            const rc = _rowCache.get(id) || _rowCache.get(isNaN(id)?id:Number(id))
-            if (!rc) continue
-            const cells = rc.tr.querySelectorAll('.fx-td')
-            if (cells[col]) { cells[col].textContent = val != null ? val : ''; rc.vals[col] = val }
-          }
-          for (const { id, row, idx } of inserts) {
-            const tr = _makeRow(row, idx)
-            _rowCache.set(id, { vals: _colKeys.map(k => row[k]), tr })
-            tbody.insertBefore(tr, tbody.querySelectorAll('tr.fx-tr')[idx] || null)
-          }
-          for (const id of deletes) {
-            const rc = _rowCache.get(id) || _rowCache.get(isNaN(id)?id:Number(id))
-            if (rc) { rc.tr.remove(); _rowCache.delete(id); _rowCache.delete(String(id)) }
-          }
-        }
-
-        if (rows.length >= 500) {
-
-          _diffAsync(rows, _colKeys, _rowCache).then(result => _schedIdle(() => _applyResult(result)))
-        } else {
-
-          _applyResult(_diffSync(rows, _colKeys, _rowCache))
-        }
       }
     }
 
-    const stateKey = binding.startsWith('@') ? binding.slice(1) : binding
-    watch(stateKey, render)
     render()
-  })
-}
+    const key = block.binding.slice(1)
+    const stop = this.state.watch(key, render)
+    this._cleanups.push(stop)
+    // Also watch computed
+    if (block.binding.startsWith('$')) {
+      const stop2 = this.state.watch(block.binding, render)
+      this._cleanups.push(stop2)
+    }
 
-function hydrateLists() {
-  document.querySelectorAll('[data-fx-list]').forEach(wrap => {
-    const binding  = wrap.getAttribute('data-fx-list')
-    const colsJSON = wrap.getAttribute('data-fx-cols')
-    const cols     = colsJSON ? JSON.parse(colsJSON) : []
+    return wrap
+  }
+
+  renderList(block) {
+    const wrap = this.el('div', 'fx-list-wrap')
 
     const render = () => {
-      let items = get(binding.startsWith('@') ? binding.slice(1) : binding)
+      let items = this.state.eval(block.binding)
       if (!Array.isArray(items)) items = []
       wrap.innerHTML = ''
       for (const item of items) {
-        const card = document.createElement('div')
-        card.className = 'fx-list-item'
-        for (const col of cols) {
-          const p = document.createElement('p')
-          p.className = 'fx-list-field'
-          p.textContent = item[col] || ''
-          card.appendChild(p)
+        const card = this.el('div', 'fx-list-item')
+        for (const f of block.fields) {
+          if (f.isLink) {
+            const href = f.path.replace(/\{([^}]+)\}/g, (_, k) => item[k] || '')
+            const a = this.el('a', 'fx-list-link')
+            a.href = href; a.textContent = f.label
+            a.addEventListener('click', e => { e.preventDefault(); Router.push(href) })
+            card.appendChild(a)
+          } else {
+            const p = this.el('p', 'fx-list-field')
+            p.textContent = item[f.key] || ''
+            card.appendChild(p)
+          }
         }
         wrap.appendChild(card)
       }
     }
 
-    watch(binding.slice(1), render)
     render()
-  })
-}
+    const key = block.binding.slice(1)
+    const stop = this.state.watch(key, render)
+    this._cleanups.push(stop)
+    return wrap
+  }
 
-function hydrateForms() {
-  document.querySelectorAll('[data-fx-form]').forEach(form => {
-    const path   = form.getAttribute('data-fx-form')
-    const method = form.getAttribute('data-fx-method') || 'POST'
-    const action = form.getAttribute('data-fx-action') || ''
-    const msg    = form.querySelector('.fx-form-msg')
-    const btn    = form.querySelector('button[type="submit"]')
+  renderForm(block) {
+    const wrap = this.el('div', 'fx-form-wrap')
+    const form = document.createElement('form')
+    form.className = 'fx-form'
+
+    for (const f of block.fields) {
+      const fieldWrap = this.el('div', 'fx-field')
+      const label = this.el('label', 'fx-label')
+      label.textContent = f.label
+      fieldWrap.appendChild(label)
+
+      if (f.type === 'select' && f.placeholder) {
+        const sel = document.createElement('select')
+        sel.className = 'fx-input'
+        sel.name = f.name
+        for (const opt of f.placeholder.split(',')) {
+          const o = document.createElement('option')
+          o.value = opt.trim(); o.textContent = opt.trim()
+          sel.appendChild(o)
+        }
+        fieldWrap.appendChild(sel)
+      } else {
+        const inp = document.createElement('input')
+        inp.className = 'fx-input'
+        inp.type = f.type
+        inp.name = f.name
+        inp.placeholder = f.placeholder
+        if (f.type !== 'password') inp.autocomplete = 'on'
+        fieldWrap.appendChild(inp)
+      }
+      form.appendChild(fieldWrap)
+    }
+
+    // Error/success message area
+    const msg = this.el('div', 'fx-form-msg')
+    form.appendChild(msg)
+
+    const btn = document.createElement('button')
+    btn.type = 'submit'
+    btn.className = 'fx-btn'
+    btn.textContent = 'Submit'
+    form.appendChild(btn)
 
     form.addEventListener('submit', async e => {
       e.preventDefault()
-      if (btn) { btn.disabled = true; btn.textContent = 'Loading...' }
-      if (msg) { msg.className = 'fx-form-msg'; msg.textContent = '' }
+      btn.disabled = true
+      btn.textContent = 'Loading...'
+      msg.textContent = ''
 
-      const body = {}
-      for (const inp of form.querySelectorAll('input,select,textarea')) {
-        if (inp.name) body[inp.name] = inp.value
+      const data = {}
+      for (const inp of form.querySelectorAll('input,select')) {
+        data[inp.name] = inp.value
       }
 
-      const { ok, data } = await http(method, resolve(path), body)
-      if (ok) {
-        if (action) applyAction(data, null, action)
-        if (msg) { msg.className = 'fx-form-msg fx-form-ok'; msg.textContent = 'Done!' }
-        toast('Saved successfully', 'ok')
-        form.reset()
-      } else {
-        const errMsg = data.message || data.error || 'Error. Try again.'
-        if (msg) { msg.className = 'fx-form-msg fx-form-err'; msg.textContent = errMsg }
-        toast(errMsg, 'err')
+      const path = this.state.resolve(block.path)
+      try {
+        const res = await fetch(path, {
+          method: block.method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        })
+        const result = await res.json()
+        if (!res.ok) {
+          msg.className = 'fx-form-msg fx-form-err'
+          msg.textContent = result.message || result.error || 'Error. Try again.'
+          btn.disabled = false
+          btn.textContent = 'Submit'
+          return
+        }
+        if (block.action) {
+          const qe = new QueryEngine(this.state)
+          qe._applyResult(result, null, block.action)
+        }
+        msg.className = 'fx-form-msg fx-form-ok'
+        msg.textContent = 'Done!'
+      } catch(err) {
+        msg.className = 'fx-form-msg fx-form-err'
+        msg.textContent = 'Network error. Try again.'
       }
-      if (btn) { btn.disabled = false; btn.textContent = 'Submit' }
+      btn.disabled = false
+      btn.textContent = 'Submit'
     })
-  })
-}
 
-function hydrateBtns() {
-  document.querySelectorAll('[data-fx-btn]').forEach(btn => {
-    const path   = btn.getAttribute('data-fx-btn')
-    const method = btn.getAttribute('data-fx-method') || 'POST'
-    const action = btn.getAttribute('data-fx-action') || ''
-    const confirm_msg = btn.getAttribute('data-fx-confirm')
-    const origText = btn.textContent
+    wrap.appendChild(form)
+    return wrap
+  }
 
-    btn.addEventListener('click', async () => {
-      if (confirm_msg) {
-        const ok = await confirm(confirm_msg)
-        if (!ok) return
-      }
-      btn.disabled = true; btn.textContent = 'Loading...'
-      const { ok, data } = await http(method, resolve(path), null)
-      if (ok) {
-        if (action) applyAction(data, null, action)
-        toast('Done', 'ok')
-      } else {
-        toast(data.message || data.error || 'Error', 'err')
-      }
-      btn.disabled = false; btn.textContent = origText
-    })
-  })
-}
-
-function hydrateSelects() {
-  document.querySelectorAll('[data-fx-model]').forEach(sel => {
-    const binding = sel.getAttribute('data-fx-model')
-    const key     = binding.replace(/^[@$]/, '')
-    sel.value     = get(key) || ''
-    sel.addEventListener('change', () => set(key, sel.value))
-    watch(key, v => { if (sel.value !== String(v)) sel.value = v })
-  })
-}
-
-function hydrateBindings() {
-  document.querySelectorAll('[data-fx-bind]').forEach(el => {
-    const expr = el.getAttribute('data-fx-bind')
-    const keys = (expr.match(/[@$][a-zA-Z_][a-zA-Z0-9_.]*/g) || []).map(m => m.slice(1).split('.')[0])
-
-    const simpleM = expr.match(/^[@$]([a-zA-Z_][a-zA-Z0-9_.]*)$/)
-    if (simpleM) {
-      const path = simpleM[1].split('.')
-      const update = () => {
-        let v = get(path[0])
-        for (let i=1;i<path.length;i++) v = v?.[path[i]]
-        el.textContent = v != null ? v : ''
-      }
-      for (const key of keys) watch(key, update)
-      update()
-    } else {
-      const update = () => { el.textContent = resolve(expr) }
-      for (const key of keys) watch(key, update)
-      update()
-    }
-  })
-}
-
-function hydrateIfs() {
-  document.querySelectorAll('[data-fx-if]').forEach(wrap => {
-    const cond = wrap.getAttribute('data-fx-if')
-    const neg  = cond.startsWith('!')
-    const expr = neg ? cond.slice(1) : cond
+  renderIf(block) {
+    const wrap = this.el('div', 'fx-if-wrap')
 
     const evalCond = () => {
-      const path = expr.replace(/^[@$]/, '').split('.')
-      let val = get(path[0])
-      for (let i = 1; i < path.length; i++) val = val?.[path[i]]
-      const t = Array.isArray(val) ? val.length > 0 : !!val
-      return neg ? !t : t
+      const cond = block.condition
+      const neg = cond.startsWith('!')
+      const expr = neg ? cond.slice(1) : cond
+      const val = this.state.eval(expr)
+      const truthy = Array.isArray(val) ? val.length > 0 : !!val
+      return neg ? !truthy : truthy
     }
-
-    const update = () => { wrap.style.display = evalCond() ? '' : 'none' }
-    watch(expr.replace(/^[@$!]/, '').split('.')[0], update)
-    update()
-  })
-}
-
-function initAnimations() {
-
-  const style = document.createElement('style')
-  style.textContent = `
-    @keyframes fx-blur-in   { from{opacity:0;filter:blur(8px);transform:translateY(8px)} to{opacity:1;filter:blur(0);transform:none} }
-    @keyframes fx-fade-up   { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:none} }
-    @keyframes fx-fade-in   { from{opacity:0} to{opacity:1} }
-    @keyframes fx-slide-up  { from{opacity:0;transform:translateY(40px)} to{opacity:1;transform:none} }
-    @keyframes fx-slide-left{ from{opacity:0;transform:translateX(30px)} to{opacity:1;transform:none} }
-    @keyframes fx-scale-in  { from{opacity:0;transform:scale(.92)} to{opacity:1;transform:scale(1)} }
-    @keyframes fx-bounce    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
-    @keyframes fx-shake     { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
-    @keyframes fx-pulse-ring{ 0%{box-shadow:0 0 0 0 rgba(99,102,241,.4)} 70%{box-shadow:0 0 0 12px transparent} 100%{box-shadow:0 0 0 0 transparent} }
-    @keyframes fx-count     { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
-
-    [class*="fx-anim-"] { opacity: 0 }
-    [class*="fx-anim-"].fx-visible { animation-fill-mode: both; animation-timing-function: cubic-bezier(.4,0,.2,1) }
-    .fx-visible.fx-anim-blur-in   { animation: fx-blur-in   .7s both }
-    .fx-visible.fx-anim-fade-up   { animation: fx-fade-up   .6s both }
-    .fx-visible.fx-anim-fade-in   { animation: fx-fade-in   .5s both }
-    .fx-visible.fx-anim-slide-up  { animation: fx-slide-up  .65s both }
-    .fx-visible.fx-anim-slide-left{ animation: fx-slide-left .6s both }
-    .fx-visible.fx-anim-scale-in  { animation: fx-scale-in  .5s both }
-    .fx-visible.fx-anim-stagger > * { animation: fx-fade-up .5s both }
-    .fx-visible.fx-anim-stagger > *:nth-child(1) { animation-delay: 0s }
-    .fx-visible.fx-anim-stagger > *:nth-child(2) { animation-delay: .1s }
-    .fx-visible.fx-anim-stagger > *:nth-child(3) { animation-delay: .2s }
-    .fx-visible.fx-anim-stagger > *:nth-child(4) { animation-delay: .3s }
-    .fx-visible.fx-anim-stagger > *:nth-child(5) { animation-delay: .4s }
-    .fx-visible.fx-anim-stagger > *:nth-child(6) { animation-delay: .5s }
-    .fx-anim-bounce { animation: fx-bounce 1.5s ease-in-out infinite !important; opacity: 1 !important }
-    .fx-anim-pulse  { animation: fx-pulse-ring 2s ease infinite !important; opacity: 1 !important }
-
-    /* ── Exit animations (AnimatePresence) ─────── */
-    @keyframes fx-exit-fade   { to{opacity:0;transform:scale(.95)} }
-    @keyframes fx-exit-up     { to{opacity:0;transform:translateY(-16px)} }
-    @keyframes fx-exit-down   { to{opacity:0;transform:translateY(16px)} }
-    @keyframes fx-exit-left   { to{opacity:0;transform:translateX(-20px)} }
-    @keyframes fx-exit-right  { to{opacity:0;transform:translateX(20px)} }
-    @keyframes fx-exit-shrink { to{opacity:0;transform:scale(0);max-height:0;padding:0;margin:0} }
-    .fx-exit           { pointer-events:none!important; animation: fx-exit-fade   .25s ease forwards }
-    .fx-exit-up        { pointer-events:none!important; animation: fx-exit-up     .25s ease forwards }
-    .fx-exit-down      { pointer-events:none!important; animation: fx-exit-down   .25s ease forwards }
-    .fx-exit-left      { pointer-events:none!important; animation: fx-exit-left   .22s ease forwards }
-    .fx-exit-right     { pointer-events:none!important; animation: fx-exit-right  .22s ease forwards }
-    .fx-exit-shrink    { pointer-events:none!important; animation: fx-exit-shrink .3s ease forwards; overflow:hidden }
-
-    /* ── Enter animations for new rows ─────────── */
-    @keyframes fx-enter-row { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:none} }
-    .fx-row-enter { animation: fx-enter-row .25s ease both }
-
-    /* ── FLIP layout transition ─────────────────── */
-    .fx-flip-pending { transition: transform .3s cubic-bezier(.4,0,.2,1) !important }
-
-    /* ── Drag with inertia ───────────────────────── */
-    .fx-dragging { opacity:.7; cursor:grabbing!important; z-index:1000; position:relative }
-    .fx-drag-ghost { opacity:.3; transition:none }
-    .fx-drop-target { outline:2px dashed rgba(99,102,241,.5); outline-offset:2px }
-  `
-  document.head.appendChild(style)
-
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('fx-visible')
-        observer.unobserve(entry.target)
-      }
-    })
-  }, { threshold: 0.12, rootMargin: '0px 0px -30px 0px' })
-
-  document.querySelectorAll('[class*="fx-anim-"]').forEach(el => {
-
-    if (el.classList.contains('fx-anim-bounce') || el.classList.contains('fx-anim-pulse')) {
-      el.classList.add('fx-visible'); return
-    }
-    observer.observe(el)
-  })
-
-  // ── AnimatePresence — animate elements before DOM removal ──────────
-// Like Framer Motion AnimatePresence. exitClass: 'fx-exit', 'fx-exit-left', etc.
-function _animateExit(el, exitClass, callback) {
-  if (!el) { callback && callback(); return }
-  exitClass = exitClass || 'fx-exit'
-  el.classList.add(exitClass)
-  const done = () => { el.removeEventListener('animationend', done); callback && callback() }
-  el.addEventListener('animationend', done, { once: true })
-  // Fallback: force removal after 350ms max (safety net)
-  setTimeout(() => { el.classList.contains(exitClass) && callback && callback() }, 350)
-}
-
-// ── FLIP layout animation ─────────────────────────────────────────
-// Capture positions BEFORE a DOM change, then animate FROM old TO new
-// Like Framer Motion layout prop — zero extra markup required
-function _flipCapture(elements) {
-  const rects = new Map()
-  elements.forEach(el => rects.set(el, el.getBoundingClientRect()))
-  return rects
-}
-function _flipPlay(rects, duration) {
-  duration = duration || 300
-  rects.forEach((oldRect, el) => {
-    if (!el.isConnected) return
-    const newRect = el.getBoundingClientRect()
-    const dx = oldRect.left - newRect.left
-    const dy = oldRect.top  - newRect.top
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
-    // Invert: move el back to where it was
-    el.style.transform = `translate(${dx}px,${dy}px)`
-    el.style.transition = 'none'
-    // Play: animate to final position
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      el.style.transition = `transform ${duration}ms cubic-bezier(.4,0,.2,1)`
-      el.style.transform = ''
-      const clean = () => { el.style.transform = ''; el.style.transition = '' }
-      el.addEventListener('transitionend', clean, { once: true })
-    }))
-  })
-}
-
-// ── Spring physics (improved — overshoot + settle) ────────────────
-function _spring(el, prop, from, to, opts) {
-  const k = opts && opts.stiffness || 200
-  const b = opts && opts.damping   || 22
-  const m = opts && opts.mass      || 1
-  const unit = opts && opts.unit   || 'px'
-  let pos = from, vel = 0, raf
-  const dt = 1/60
-  const tick = () => {
-    const F = -k*(pos-to) - b*vel
-    vel += (F/m)*dt; pos += vel*dt
-    el.style[prop] = pos + unit
-    if (Math.abs(pos-to) > 0.05 || Math.abs(vel) > 0.05) {
-      raf = requestAnimationFrame(tick)
-    } else {
-      el.style[prop] = to + unit
-    }
-  }
-  cancelAnimationFrame(raf)
-  requestAnimationFrame(tick)
-}
-
-// ── Drag with inertia ─────────────────────────────────────────────
-// HTML5 drag is used for kanban. This adds pointer-based drag
-// for any element with data-fx-draggable attribute.
-// Inertia: on pointerup, continues movement with exponential decay.
-function _initDragInertia(el, opts) {
-  opts = opts || {}
-  const onDrop = opts.onDrop
-  let startX, startY, lastX, lastY, velX = 0, velY = 0
-  let lastTime, raf, isDragging = false
-
-  el.style.cursor = 'grab'
-  el.style.userSelect = 'none'
-  el.style.touchAction = 'none'
-
-  const onDown = e => {
-    e.preventDefault()
-    isDragging = true
-    el.classList.add('fx-dragging')
-    startX = lastX = e.clientX
-    startY = lastY = e.clientY
-    lastTime = Date.now()
-    velX = velY = 0
-    cancelAnimationFrame(raf)
-    document.addEventListener('pointermove', onMove, { passive: false })
-    document.addEventListener('pointerup', onUp, { once: true })
-  }
-
-  const onMove = e => {
-    if (!isDragging) return
-    const now = Date.now()
-    const dt = Math.max(now - lastTime, 1)
-    const dx = e.clientX - lastX
-    const dy = e.clientY - lastY
-    // Exponential moving average for velocity
-    velX = velX * 0.7 + (dx / dt) * 0.3 * 16
-    velY = velY * 0.7 + (dy / dt) * 0.3 * 16
-    lastX = e.clientX; lastY = e.clientY; lastTime = now
-    const totalDx = e.clientX - startX
-    const totalDy = e.clientY - startY
-    el.style.transform = `translate(${totalDx}px,${totalDy}px)`
-  }
-
-  const onUp = e => {
-    isDragging = false
-    el.classList.remove('fx-dragging')
-    document.removeEventListener('pointermove', onMove)
-    const speed = Math.sqrt(velX*velX + velY*velY)
-    if (speed < 0.5) {
-      el.style.transition = 'transform .3s cubic-bezier(.4,0,.2,1)'
-      el.style.transform = ''
-      onDrop && onDrop(e)
-      return
-    }
-    // Inertia: continue with decay
-    let dx = parseFloat(el.style.transform.match(/translate\(([^,]+)/)?.[1]) || 0
-    let dy = parseFloat(el.style.transform.match(/,([^)]+)/)?.[1]) || 0
-    const decay = () => {
-      velX *= 0.88; velY *= 0.88
-      dx += velX; dy += velY
-      el.style.transform = `translate(${dx}px,${dy}px)`
-      if (Math.abs(velX) > 0.5 || Math.abs(velY) > 0.5) {
-        raf = requestAnimationFrame(decay)
-      } else {
-        el.style.transition = 'transform .2s cubic-bezier(.4,0,.2,1)'
-        el.style.transform = ''
-        onDrop && onDrop(e)
-      }
-    }
-    raf = requestAnimationFrame(decay)
-  }
-
-  el.addEventListener('pointerdown', onDown)
-  return () => el.removeEventListener('pointerdown', onDown)
-}
-
-window.aiplang = window.aiplang || {}
-  window.aiplang.animateExit = _animateExit
-window.aiplang.flip = { capture: _flipCapture, play: _flipPlay }
-window.aiplang.draggable = _initDragInertia
-window.aiplang.spring = function(el, prop, from, to, opts = {}) {
-    const k  = opts.stiffness || 180
-    const b  = opts.damping   || 22
-    const m  = opts.mass      || 1
-    let pos = from, vel = 0
-    const dt = 1/60
-    let raf
-
-    const tick = () => {
-      const F = -k * (pos - to) - b * vel
-      vel += (F / m) * dt
-      pos += vel * dt
-      if (Math.abs(pos - to) < 0.01 && Math.abs(vel) < 0.01) {
-        pos = to
-        el.style[prop] = pos + (opts.unit || 'px')
-        return
-      }
-      el.style[prop] = pos + (opts.unit || 'px')
-      raf = requestAnimationFrame(tick)
-    }
-    cancelAnimationFrame(raf)
-    requestAnimationFrame(tick)
-  }
-
-  const springObs = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-      if (!entry.isIntersecting) return
-      const el = entry.target
-      if (el.classList.contains('fx-anim-spring')) {
-        el.style.opacity = '1'
-        el.style.transform = 'translateY(0px)'
-        window.aiplang.spring(el, '--spring-y', 24, 0, { stiffness: 200, damping: 20, unit: 'px' })
-        springObs.unobserve(el)
-      }
-    })
-  }, { threshold: 0.1 })
-
-  document.querySelectorAll('.fx-anim-spring').forEach(el => {
-    el.style.opacity = '0'
-    el.style.transform = 'translateY(24px)'
-    springObs.observe(el)
-  })
-
-  document.querySelectorAll('.fx-stat-val').forEach(el => {
-    const target = parseFloat(el.textContent)
-    if (isNaN(target) || target === 0) return
-    const isFloat = el.textContent.includes('.')
-    let hasAnimated = false
-    const obs = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting || hasAnimated) return
-      hasAnimated = true
-      obs.unobserve(el)
-      const dur = Math.min(1200, Math.max(600, target * 2))
-      const start = Date.now()
-      const tick = () => {
-        const elapsed = Date.now() - start
-        const progress = Math.min(elapsed / dur, 1)
-        const eased = 1 - Math.pow(1 - progress, 3)
-        const current = target * eased
-        el.textContent = isFloat ? current.toFixed(1) : Math.round(current).toLocaleString()
-        if (progress < 1) requestAnimationFrame(tick)
-      }
-      requestAnimationFrame(tick)
-    }, { threshold: 0.5 })
-    obs.observe(el)
-  })
-}
-
-function injectActionCSS() {
-  const style = document.createElement('style')
-  style.textContent = `
-    .fx-td-actions { padding: .5rem 1rem !important; }
-    .fx-action-btn {
-      border: none; cursor: pointer; font-size: .75rem; font-weight: 600;
-      padding: .3rem .75rem; border-radius: .375rem; margin-right: .375rem;
-      font-family: inherit; transition: opacity .15s, transform .1s;
-    }
-    .fx-action-btn:hover { opacity: .85; transform: translateY(-1px); }
-    .fx-action-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
-    .fx-edit-btn   { background: #1e40af; color: #93c5fd; }
-    .fx-delete-btn { background: #7f1d1d; color: #fca5a5; }
-    .fx-th-actions { color: #475569 !important; }
-  `
-  document.head.appendChild(style)
-}
-
-const _workerSrc = `
-'use strict'
-
-let _sab = null, _sabView = null
-
-self.onmessage = function(e) {
-  const { type, rows, colKeys, cache, reqId, sab } = e.data
-
-  if (sab) { _sab = sab; _sabView = new Int32Array(sab) }
-
-  if (type !== 'diff') return
-  const patches = [], inserts = [], deletes = []
-  const seenIds = new Set()
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
-    const id = row.id != null ? row.id : i
-    seenIds.add(typeof id === 'number' ? id : String(id))
-    const cached = cache[id]
-    if (!cached) { inserts.push({ id, row, idx: i }); continue }
-    for (let c = 0; c < colKeys.length; c++) {
-      const nv = row[colKeys[c]] ?? null
-      const ov = cached[c] ?? null
-      if (nv !== ov) patches.push({ id, col: c, val: row[colKeys[c]] })
-    }
-  }
-  for (const id in cache) {
-    const nid = isNaN(id) ? id : Number(id)
-    if (!seenIds.has(String(id)) && !seenIds.has(nid)) deletes.push(id)
-  }
-
-  if (_sabView && patches.length < 8000) {
-    Atomics.store(_sabView, 0, patches.length)
-    for (let i = 0; i < patches.length; i++) {
-
-      _sabView[1 + i*3]   = typeof patches[i].id === 'number' ? patches[i].id : patches[i].id.length
-      _sabView[1 + i*3+1] = patches[i].col
-      _sabView[1 + i*3+2] = 0
-    }
-    Atomics.store(_sabView, 0, patches.length | 0x80000000)
-
-    self.postMessage({ type: 'patches', patches, inserts, deletes, reqId, usedSAB: true })
-  } else {
-    self.postMessage({ type: 'patches', patches, inserts, deletes, reqId, usedSAB: false })
-  }
-}
-`
-
-let _diffWorker = null
-const _wCbs = new Map()
-let _wReq = 0
-let _wSAB = null
-
-function _getWorker() {
-  if (_diffWorker) return _diffWorker
-  try {
-    _diffWorker = new Worker(URL.createObjectURL(new Blob([_workerSrc], { type:'application/javascript' })))
-    _diffWorker.onmessage = (e) => {
-      const cb = _wCbs.get(e.data.reqId)
-      if (cb) { cb(e.data); _wCbs.delete(e.data.reqId) }
-    }
-    _diffWorker.onerror = () => { _diffWorker = null }
-
-    try {
-      const sab = new SharedArrayBuffer(8000 * 3 * 4 + 4)
-      _diffWorker.postMessage({ type: 'init_sab', sab }, [])
-      _wSAB = new Int32Array(sab)
-    } catch(_e) { if(typeof console !== 'undefined') console.debug('[aiplang]',_e?.message) }
-  } catch { _diffWorker = null }
-  return _diffWorker
-}
-
-function _diffAsync(rows, colKeys, rowCache) {
-  return new Promise(resolve => {
-    const w = _getWorker()
-    if (!w) { resolve(_diffSync(rows, colKeys, rowCache)); return }
-    const id = ++_wReq
-    _wCbs.set(id, resolve)
-    const cObj = {}
-    for (const [k, v] of rowCache.entries()) cObj[k] = v.vals
-    w.postMessage({ type:'diff', rows, colKeys, cache:cObj, reqId:id })
-  })
-}
-
-function _buildTypedCache(rows, colKeys) {
-  const n = rows.length
-  const isNum = colKeys.map(k => {
-    const v = rows[0]?.[k]; return typeof v === 'number' || (v != null && !isNaN(Number(v)) && typeof v !== 'string')
-  })
-  const scores   = new Float64Array(n)
-  const statuses = new Uint8Array(n)
-  const strCols  = []
-  colKeys.forEach((k,j) => {
-    if (!isNum[j]) strCols.push(j)
-  })
-  rows.forEach((r,i) => {
-
-    colKeys.forEach((k,j) => { if(isNum[j]) { const buf=j===0?scores:null; if(buf) buf[i]=Number(r[k])||0 } })
-
-    const numIdx = colKeys.findIndex((_,j)=>isNum[j] && j>1)
-    if(numIdx>=0) scores[i] = Number(rows[i][colKeys[numIdx]])||0
-
-    const enumIdx = colKeys.findIndex((_,j)=>!isNum[j] && j>1)
-    if(enumIdx>=0) statuses[i] = _STATUS_INT[rows[i][colKeys[enumIdx]]]??0
-  })
-  return {
-    scores, statuses,
-    prevVals: colKeys.map(k => rows.map(r => r[k])),
-    isNum, colKeys, n,
-    ids: rows.map(r => r.id)
-  }
-}
-
-function _diffSync(rows, colKeys, rowCache) {
-  const patches = [], inserts = [], deletes = [], seen = new Set()
-  const nCols = colKeys.length
-
-  const compiledKey = stateKey
-  const compiledInit = window['__aip_init_' + compiledKey]
-  const compiledDiff = window['__aip_diff_' + compiledKey]
-
-  if (compiledDiff && rowCache._compiled && rows.length === rowCache._compiled_n
-      && rows.length > 0 && rowCache._ids?.length === rows.length) {
-
-    const raw = compiledDiff(rows, rowCache._compiled)
-    for (const pack of raw) {
-      const i = pack >> 4, col = pack & 0xf
-      const id = rowCache._ids[i]
-      if (id != null) {
-        seen.add(id)
-        patches.push({ id, col, val: rows[i][colKeys[col]] })
-      }
-    }
-    for (const [id] of rowCache) if (id !== '_compiled' && id !== '_ids' && id !== '_compiled_n' && !seen.has(id)) deletes.push(id)
-    return { patches, inserts, deletes }
-  }
-
-  const tc = rowCache._typed
-  if (tc && rows.length === tc.n) {
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i], id = tc.ids[i]
-      seen.add(id)
-      for (let j = 0; j < nCols; j++) {
-        const k = colKeys[j]
-        const newVal = r[k]
-        const prevVal = tc.prevVals[j][i]
-        if (newVal !== prevVal) {
-          tc.prevVals[j][i] = newVal
-          patches.push({ id, col:j, val:newVal })
-        }
-      }
-    }
-    for (const [id] of rowCache) if (id !== '_typed' && !seen.has(id)) deletes.push(id)
-    return { patches, inserts, deletes }
-  }
-
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i], id = r.id != null ? r.id : i
-    seen.add(id)
-    const c = rowCache.get(id)
-    if (!c) { inserts.push({ id, row:r, idx:i }); continue }
-    const vals = c.vals
-    const nCols4 = nCols === 4
-    if (nCols4) {
-      const v0=r[colKeys[0]]??null; if(vals[0]!==v0){patches.push({id,col:0,val:r[colKeys[0]]});vals[0]=v0}
-      const v1=r[colKeys[1]]??null; if(vals[1]!==v1){patches.push({id,col:1,val:r[colKeys[1]]});vals[1]=v1}
-      const v2=r[colKeys[2]]??null; if(vals[2]!==v2){patches.push({id,col:2,val:r[colKeys[2]]});vals[2]=v2}
-      const v3=r[colKeys[3]]??null; if(vals[3]!==v3){patches.push({id,col:3,val:r[colKeys[3]]});vals[3]=v3}
-    } else {
-      for (let j = 0; j < nCols; j++) {
-        const nv = r[colKeys[j]] ?? null
-        if (vals[j] !== nv) { patches.push({ id, col:j, val:r[colKeys[j]] }); vals[j]=nv }
-      }
-    }
-  }
-  for (const [id] of rowCache) if (id !== '_typed' && !seen.has(id)) deletes.push(id)
-  return { patches, inserts, deletes }
-}
-
-const _idleQ = []
-let _idleSched = false
-const _ric = window.requestIdleCallback
-  ? window.requestIdleCallback.bind(window)
-  : (cb) => setTimeout(() => cb({ timeRemaining: () => 16 }), 4)
-
-function _schedIdle(fn) {
-  _idleQ.push(fn)
-  if (!_idleSched) {
-    _idleSched = true
-    _ric(_flushIdle, { timeout: 5000 })
-  }
-}
-
-function _flushIdle(dl) {
-  _idleSched = false
-  while (_idleQ.length && dl.timeRemaining() > 1) {
-    try { _idleQ.shift()() } catch(_e) { if(typeof console !== 'undefined') console.debug('[aiplang]',_e?.message) }
-  }
-  if (_idleQ.length) { _idleSched = true; _ric(_flushIdle, { timeout: 5000 }) }
-}
-
-async function _renderIncremental(items, renderFn, chunkSize = 200) {
-  for (let i = 0; i < items.length; i += chunkSize) {
-    const chunk = items.slice(i, i + chunkSize)
-    chunk.forEach((item, j) => renderFn(item, i + j))
-    if (i + chunkSize < items.length) {
-      await new Promise(r => requestAnimationFrame(r))
-    }
-  }
-}
-
-const _MAX_ROWS   = 100000
-const _scoreBuf   = new Float64Array(_MAX_ROWS)
-const _statusBuf  = new Uint8Array(_MAX_ROWS)
-const _STATUS_INT = {active:0,inactive:1,pending:2,blocked:3,
-  enabled:0,disabled:1,true:0,false:1,yes:0,no:1,
-  pending:2,done:3,todo:0,doing:1,done:2,
-  new:0,open:1,closed:2,resolved:3}
-
-const _mp = (() => {
-  const td = new TextDecoder()
-  function decode(buf) {
-    const b = buf instanceof ArrayBuffer ? new Uint8Array(buf) : buf
-    return _read(b, {p:0})
-  }
-  function _read(b, s) {
-    const t = b[s.p++]
-    if (t <= 0x7f) return t
-    if (t >= 0xe0) return t - 256
-    if ((t & 0xe0) === 0xa0) return _str(b, s, t & 0x1f)
-    if ((t & 0xf0) === 0x90) return _arr(b, s, t & 0xf)
-    if ((t & 0xf0) === 0x80) return _map(b, s, t & 0xf)
-    switch (t) {
-      case 0xc0: return null
-      case 0xc2: return false
-      case 0xc3: return true
-      case 0xca: { const v=new DataView(b.buffer,b.byteOffset+s.p,4); s.p+=4; return v.getFloat32(0) }
-      case 0xcb: { const v=new DataView(b.buffer,b.byteOffset+s.p,8); s.p+=8; return v.getFloat64(0) }
-      case 0xcc: return b[s.p++]
-      case 0xcd: { const v=(b[s.p]<<8)|b[s.p+1]; s.p+=2; return v }
-      case 0xce: { const v=new DataView(b.buffer,b.byteOffset+s.p,4); s.p+=4; return v.getUint32(0) }
-      case 0xd0: { const v=b[s.p++]; return v>127?v-256:v }
-      case 0xd1: { const v=(b[s.p]<<8)|b[s.p+1]; s.p+=2; return v>32767?v-65536:v }
-      case 0xd2: { const v=new DataView(b.buffer,b.byteOffset+s.p,4); s.p+=4; return v.getInt32(0) }
-      case 0xd9: { const n=b[s.p++]; return _str(b,s,n) }
-      case 0xda: { const n=(b[s.p]<<8)|b[s.p+1]; s.p+=2; return _str(b,s,n) }
-      case 0xdc: { const n=(b[s.p]<<8)|b[s.p+1]; s.p+=2; return _arr(b,s,n) }
-      case 0xdd: { const v=new DataView(b.buffer,b.byteOffset+s.p,4); s.p+=4; return _arr(b,s,v.getUint32(0)) }
-      case 0xde: { const n=(b[s.p]<<8)|b[s.p+1]; s.p+=2; return _map(b,s,n) }
-      default: return null
-    }
-  }
-  function _str(b,s,n){const v=td.decode(b.subarray(s.p,s.p+n));s.p+=n;return v}
-  function _arr(b,s,n){const a=[];for(let i=0;i<n;i++)a.push(_read(b,s));return a}
-  function _map(b,s,n){const o={};for(let i=0;i<n;i++){const k=_read(b,s);o[k]=_read(b,s)}return o}
-  return { decode }
-})()
-
-function loadSSRData() {
-  const ssr = window.__SSR_DATA__
-  if (!ssr) return
-  for (const [key, value] of Object.entries(ssr)) {
-    _state[key] = value
-  }
-}
-
-function hydrateOptimistic() {
-  document.querySelectorAll('[data-fx-optimistic]').forEach(form => {
-    const action = form.getAttribute('data-fx-action') || ''
-    const pm = action.match(/^@([a-zA-Z_]+)\.push\(\$result\)$/)
-    if (!pm) return
-    const key = pm[1]
-
-    form.addEventListener('submit', (e) => {
-
-      const body = {}
-      form.querySelectorAll('input,select,textarea').forEach(inp => {
-        if (inp.name) body[inp.name] = inp.value
-      })
-      const tempId = '__temp_' + Date.now()
-      const optimisticItem = { ...body, id: tempId, _optimistic: true }
-      const current = [...(get(key) || [])]
-      set(key, [...current, optimisticItem])
-
-      const origAction = form.getAttribute('data-fx-action')
-      form.setAttribute('data-fx-action-orig', origAction)
-      form.setAttribute('data-fx-action', `@${key}._rollback_${tempId}`)
-
-      setTimeout(() => {
-        form.setAttribute('data-fx-action', origAction)
-
-        setTimeout(() => {
-          const arr = get(key) || []
-          const hasReal = arr.some(i => !i._optimistic)
-          if (hasReal) set(key, arr.filter(i => !i._optimistic || i.id !== tempId))
-        }, 500)
-      }, 50)
-    }, true)
-  })
-}
-
-function hydrateTableErrors() {
-  document.querySelectorAll('[data-fx-fallback]').forEach(tbl => {
-    const fallback = tbl.getAttribute('data-fx-fallback')
-    const retryPath = tbl.getAttribute('data-fx-retry')
-    const binding = tbl.getAttribute('data-fx-table')
-    if (!fallback) return
-
-    const tbody = tbl.querySelector('tbody')
-    const originalEmpty = tbl.getAttribute('data-fx-empty') || 'No data.'
-
-    const key = binding?.replace(/^@/, '') || ''
-    if (key) {
-      const cleanup = watch(key, (val) => {
-        if (val === '__error__') {
-          if (tbody) {
-            const cols = JSON.parse(tbl.getAttribute('data-fx-cols') || '[]')
-
-              tbody.innerHTML = ''
-              const _fe = (() => {
-                const tr=document.createElement('tr'), td=document.createElement('td')
-                td.colSpan=cols.length+2; td.className='fx-td-empty'; td.style.color='#f87171'
-                td.textContent=fallback
-                if(retryPath){
-                  const btn=document.createElement('button')
-                  btn.textContent='↻ Retry'; btn.style.cssText='margin-left:.75rem;padding:.3rem .75rem;background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:#f87171;border-radius:.375rem;cursor:pointer;font-size:.75rem'
-                  btn.onclick=()=>window.__aiplang_retry&&window.__aiplang_retry(binding,retryPath)
-                  td.appendChild(btn)
-                }
-                tr.appendChild(td); return tr
-              })()
-              tbody.appendChild(_fe)
-          }
-        }
-      })
-    }
-  })
-
-  window.__aiplang_retry = (binding, path) => {
-    const key = binding.replace(/^@/, '')
-    set(key, [])
-    runQuery({ method: 'GET', path, target: binding })
-  }
-}
-
-function initDraggables() {
-  document.querySelectorAll('[data-fx-draggable]').forEach(el => {
-    _initDragInertia(el, {
-      onDrop: e => {
-        const action = el.getAttribute('data-fx-drop-action')
-        if (action) applyAction({}, null, action)
-      }
-    })
-  })
-}
-
-function boot() {
-  loadSSRData()
-  injectActionCSS()
-  initAnimations()
-  hydrateBindings()
-  hydrateTables()
-  hydrateTableErrors()
-  hydrateLists()
-  hydrateForms()
-  hydrateOptimistic()
-  hydrateBtns()
-  hydrateSelects()
-  hydrateIfs()
-  hydrateEach()
-  hydrateCharts()
-  hydrateKanban()
-  hydrateEditors()
-  initDraggables()
-  mountQueries()
-}
-
-function hydrateEach() {
-  document.querySelectorAll('[data-fx-each]').forEach(wrap => {
-    const binding = wrap.getAttribute('data-fx-each')
-    const tpl     = wrap.getAttribute('data-fx-tpl') || ''
-    const key     = binding.startsWith('@') ? binding.slice(1) : binding
 
     const render = () => {
-      let items = get(key)
-      if (!Array.isArray(items)) items = []
       wrap.innerHTML = ''
-
-      if (!items.length) {
-        const empty = document.createElement('div')
-        empty.className = 'fx-each-empty fx-td-empty'
-        empty.textContent = wrap.getAttribute('data-fx-empty') || 'No items.'
-        wrap.appendChild(empty)
-        return
+      if (evalCond()) {
+        // Parse and render inner block
+        const innerLine = block.inner
+        const bi = innerLine.indexOf('{')
+        if (bi !== -1) {
+          const head = innerLine.slice(0,bi).trim()
+          const body = innerLine.slice(bi+1, innerLine.lastIndexOf('}')).trim()
+          const m = head.match(/^([a-z]+)(\d+)?$/)
+          const innerBlock = {
+            kind: m ? m[1] : head,
+            cols: m && m[2] ? parseInt(m[2]) : 3,
+            items: parseItems(body),
+          }
+          const el = this.renderBlock(innerBlock)
+          if (el) wrap.appendChild(el)
+        }
       }
-
-      items.forEach(item => {
-        const div = document.createElement('div')
-        div.className = 'fx-each-item'
-
-        const html = tpl.replace(/\{item\.([^}]+)\}/g, (_, field) => {
-          const parts = field.split('.')
-          let val = item
-          for (const p of parts) val = val?.[p]
-          return val != null ? String(val) : ''
-        })
-        div.textContent = html || (item.name || item.title || item.label || JSON.stringify(item))
-        wrap.appendChild(div)
-      })
     }
 
-    watch(key, render)
     render()
-  })
+
+    // Watch all @vars in condition
+    const matches = block.condition.match(/[@$][a-zA-Z_][a-zA-Z0-9_.]*/g) || []
+    for (const m of matches) {
+      const key = m.startsWith('@') || m.startsWith('$') ? m.slice(1) : m
+      const stop = this.state.watch(key, render)
+      this._cleanups.push(stop)
+    }
+
+    return wrap
+  }
+
+  renderAlert(block) {
+    const div = this.el('div', 'fx-alert')
+    if (block.items?.[0]?.[0]) {
+      div.textContent = this.t(block.items[0][0].text)
+    }
+    return div
+  }
+
+  destroy() {
+    for (const fn of this._cleanups) fn()
+    this._cleanups = []
+  }
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot)
-} else {
-  boot()
+// ─────────────────────────────────────────────────────────────
+// ROUTER
+// ─────────────────────────────────────────────────────────────
+
+const Router = {
+  pages: [],
+  container: null,
+  currentRenderer: null,
+  currentQE: null,
+
+  init(pages, container) {
+    this.pages = pages
+    this.container = container
+    window.addEventListener('popstate', () => this._render(location.pathname))
+    this._render(location.pathname)
+  },
+
+  push(path) {
+    if (path === location.pathname) return
+    history.pushState({}, '', path)
+    this._render(path)
+  },
+
+  _render(path) {
+    // Match route
+    let page = this.pages.find(p => p.route === path)
+    if (!page) {
+      // Try prefix match
+      page = this.pages.find(p => path.startsWith(p.route) && p.route !== '/')
+    }
+    if (!page) page = this.pages.find(p => p.route === '/')
+    if (!page) return
+
+    // Destroy previous
+    if (this.currentRenderer) this.currentRenderer.destroy()
+    if (this.currentQE) this.currentQE.destroy()
+
+    // New state for this page
+    const state = new State()
+    for (const [k, v] of Object.entries(page.state || {})) state.set(k, v)
+    for (const [k, expr] of Object.entries(page.computed || {})) {
+      state.defineComputed(k, expr.replace(/@([a-zA-Z_]+)/g, '_$1').replace(/\$([a-zA-Z_]+)/g, 'computed.$1'))
+    }
+
+    // Render
+    const renderer = new Renderer(state, this.container)
+    renderer.render(page)
+    this.currentRenderer = renderer
+
+    // Queries
+    const qe = new QueryEngine(state)
+    qe.mountAll(page.queries)
+    this.currentQE = qe
+
+    // Update page title
+    document.title = page.id.charAt(0).toUpperCase() + page.id.slice(1)
+  }
 }
+
+// ─────────────────────────────────────────────────────────────
+// CSS
+// ─────────────────────────────────────────────────────────────
+
+const CSS = `
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{text-decoration:none;color:inherit}
+input,button,select{font-family:inherit}
+.aip-root{min-height:100vh}
+.aip-theme-dark{background:#030712;color:#f1f5f9}
+.aip-theme-light{background:#fff;color:#0f172a}
+.aip-theme-acid{background:#000;color:#a3e635}
+.fx-nav{display:flex;align-items:center;justify-content:space-between;padding:1rem 2.5rem;position:sticky;top:0;z-index:50;backdrop-filter:blur(12px)}
+.aip-theme-dark .fx-nav{border-bottom:1px solid #1e293b;background:rgba(3,7,18,.85)}
+.aip-theme-light .fx-nav{border-bottom:1px solid #e2e8f0;background:rgba(255,255,255,.85)}
+.aip-theme-acid .fx-nav{border-bottom:1px solid #1a2e05;background:rgba(0,0,0,.9)}
+.fx-brand{font-size:1.25rem;font-weight:800;letter-spacing:-.03em}
+.fx-nav-links{display:flex;align-items:center;gap:1.75rem}
+.fx-nav-link{font-size:.875rem;font-weight:500;opacity:.65;transition:opacity .15s;cursor:pointer}
+.fx-nav-link:hover{opacity:1}
+.aip-theme-dark .fx-nav-link{color:#cbd5e1}
+.aip-theme-light .fx-nav-link{color:#475569}
+.aip-theme-acid .fx-nav-link{color:#86efac}
+.fx-hero{display:flex;align-items:center;justify-content:center;min-height:92vh;padding:4rem 1.5rem}
+.fx-hero-inner{max-width:56rem;text-align:center;display:flex;flex-direction:column;align-items:center;gap:1.5rem}
+.fx-title{font-size:clamp(2.5rem,8vw,5.5rem);font-weight:900;letter-spacing:-.04em;line-height:1}
+.fx-sub{font-size:clamp(1rem,2vw,1.25rem);line-height:1.75;max-width:40rem}
+.aip-theme-dark .fx-sub{color:#94a3b8}
+.aip-theme-light .fx-sub{color:#475569}
+.fx-cta{display:inline-flex;align-items:center;padding:.875rem 2.5rem;border-radius:.75rem;font-weight:700;font-size:1rem;letter-spacing:-.01em;transition:transform .15s,box-shadow .15s;margin:.25rem;cursor:pointer}
+.fx-cta:hover{transform:translateY(-1px)}
+.aip-theme-dark .fx-cta{background:#2563eb;color:#fff;box-shadow:0 8px 24px rgba(37,99,235,.35)}
+.aip-theme-light .fx-cta{background:#2563eb;color:#fff}
+.aip-theme-acid .fx-cta{background:#a3e635;color:#000;font-weight:800}
+.fx-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:3rem;padding:5rem 2.5rem;text-align:center}
+.fx-stat-val{font-size:clamp(2.5rem,5vw,4rem);font-weight:900;letter-spacing:-.04em;line-height:1}
+.fx-stat-lbl{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;margin-top:.5rem}
+.aip-theme-dark .fx-stat-lbl{color:#64748b}
+.aip-theme-light .fx-stat-lbl{color:#94a3b8}
+.fx-grid{display:grid;gap:1.25rem;padding:1rem 2.5rem 5rem}
+.fx-grid-2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.fx-grid-3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.fx-grid-4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.fx-card{border-radius:1rem;padding:1.75rem;transition:transform .2s,box-shadow .2s}
+.fx-card:hover{transform:translateY(-2px)}
+.aip-theme-dark .fx-card{background:#0f172a;border:1px solid #1e293b}
+.aip-theme-light .fx-card{background:#f8fafc;border:1px solid #e2e8f0}
+.aip-theme-acid .fx-card{background:#0a0f00;border:1px solid #1a2e05}
+.aip-theme-dark .fx-card:hover{box-shadow:0 20px 40px rgba(0,0,0,.5)}
+.aip-theme-light .fx-card:hover{box-shadow:0 20px 40px rgba(0,0,0,.08)}
+.fx-icon{font-size:2rem;margin-bottom:1rem}
+.fx-card-title{font-size:1.0625rem;font-weight:700;letter-spacing:-.02em;margin-bottom:.5rem}
+.fx-card-body{font-size:.875rem;line-height:1.65}
+.aip-theme-dark .fx-card-body{color:#64748b}
+.aip-theme-light .fx-card-body{color:#475569}
+.fx-card-link{font-size:.8125rem;font-weight:600;display:inline-block;margin-top:1rem;opacity:.6;transition:opacity .15s}
+.fx-card-link:hover{opacity:1}
+.fx-sect{padding:5rem 2.5rem}
+.fx-sect-title{font-size:clamp(1.75rem,4vw,3rem);font-weight:800;letter-spacing:-.04em;margin-bottom:1.5rem;text-align:center}
+.fx-sect-body{font-size:1rem;line-height:1.75;text-align:center;max-width:48rem;margin:0 auto}
+.aip-theme-dark .fx-sect-body{color:#64748b}
+.fx-form-wrap{padding:3rem 2.5rem;display:flex;justify-content:center}
+.fx-form{width:100%;max-width:28rem;border-radius:1.25rem;padding:2.5rem}
+.aip-theme-dark .fx-form{background:#0f172a;border:1px solid #1e293b}
+.aip-theme-light .fx-form{background:#f8fafc;border:1px solid #e2e8f0}
+.fx-field{margin-bottom:1.25rem}
+.fx-label{display:block;font-size:.8125rem;font-weight:600;margin-bottom:.5rem}
+.aip-theme-dark .fx-label{color:#94a3b8}
+.aip-theme-light .fx-label{color:#475569}
+.fx-input{width:100%;padding:.75rem 1rem;border-radius:.625rem;font-size:.9375rem;outline:none;transition:box-shadow .15s;background:transparent}
+.fx-input:focus{box-shadow:0 0 0 3px rgba(37,99,235,.35)}
+.aip-theme-dark .fx-input{background:#020617;border:1px solid #1e293b;color:#f1f5f9}
+.aip-theme-dark .fx-input::placeholder{color:#334155}
+.aip-theme-light .fx-input{background:#fff;border:1px solid #cbd5e1;color:#0f172a}
+.aip-theme-acid .fx-input{background:#000;border:1px solid #1a2e05;color:#a3e635}
+.fx-btn{width:100%;padding:.875rem 1.5rem;border:none;border-radius:.625rem;font-size:.9375rem;font-weight:700;cursor:pointer;margin-top:.5rem;transition:transform .15s,opacity .15s;letter-spacing:-.01em}
+.fx-btn:hover{transform:translateY(-1px)}
+.fx-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.aip-theme-dark .fx-btn{background:#2563eb;color:#fff;box-shadow:0 4px 14px rgba(37,99,235,.4)}
+.aip-theme-light .fx-btn{background:#2563eb;color:#fff}
+.aip-theme-acid .fx-btn{background:#a3e635;color:#000;font-weight:800}
+.fx-form-msg{font-size:.8125rem;padding:.5rem 0;min-height:1.5rem;text-align:center}
+.fx-form-err{color:#f87171}
+.fx-form-ok{color:#4ade80}
+.fx-table-wrap{overflow-x:auto;padding:0 2.5rem 4rem}
+.fx-table{width:100%;border-collapse:collapse;font-size:.875rem}
+.fx-th{text-align:left;padding:.875rem 1.25rem;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.aip-theme-dark .fx-th{color:#475569;border-bottom:1px solid #1e293b}
+.aip-theme-light .fx-th{color:#94a3b8;border-bottom:1px solid #e2e8f0}
+.fx-tr{transition:background .1s}
+.fx-td{padding:.875rem 1.25rem}
+.aip-theme-dark .fx-tr:hover{background:#0f172a}
+.aip-theme-light .fx-tr:hover{background:#f8fafc}
+.aip-theme-dark .fx-td{border-bottom:1px solid #0f172a}
+.aip-theme-light .fx-td{border-bottom:1px solid #f1f5f9}
+.fx-td-empty{padding:2rem 1.25rem;text-align:center;opacity:.4}
+.fx-list-wrap{padding:1rem 2.5rem 4rem;display:flex;flex-direction:column;gap:.75rem}
+.fx-list-item{border-radius:.75rem;padding:1.25rem 1.5rem}
+.aip-theme-dark .fx-list-item{background:#0f172a;border:1px solid #1e293b}
+.fx-list-field{font-size:.9375rem;line-height:1.5}
+.fx-list-link{font-size:.8125rem;font-weight:600;opacity:.6;transition:opacity .15s}
+.fx-list-link:hover{opacity:1}
+.fx-alert{padding:1rem 2.5rem;font-size:.9375rem;font-weight:500;border-radius:.75rem;margin:1rem 2.5rem}
+.aip-theme-dark .fx-alert{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#fca5a5}
+.fx-if-wrap{display:contents}
+.fx-footer{padding:3rem 2.5rem;text-align:center}
+.aip-theme-dark .fx-footer{border-top:1px solid #1e293b}
+.aip-theme-light .fx-footer{border-top:1px solid #e2e8f0}
+.fx-footer-text{font-size:.8125rem}
+.aip-theme-dark .fx-footer-text{color:#334155}
+.fx-footer-link{font-size:.8125rem;margin:0 .75rem;opacity:.5;transition:opacity .15s}
+.fx-footer-link:hover{opacity:1}
+`
+
+// ─────────────────────────────────────────────────────────────
+// BOOTSTRAP
+// ─────────────────────────────────────────────────────────────
+
+function boot(src, container) {
+  // Inject CSS once
+  if (!document.getElementById('aiplang-css')) {
+    const style = document.createElement('style')
+    style.id = 'aiplang-css'
+    style.textContent = CSS
+    document.head.appendChild(style)
+  }
+
+  const pages = parseFlux(src)
+  if (!pages.length) {
+    container.textContent = '[aiplang] no pages found'
+    return
+  }
+
+  Router.init(pages, container)
+}
+
+return { boot, parseFlux, State, Renderer, Router, QueryEngine }
 
 })()
+
+// Auto-boot from <script type="text/aiplang">
+document.addEventListener('DOMContentLoaded', () => {
+  const script = document.querySelector('script[type="text/aiplang"]')
+  if (script) {
+    const targetSel = script.getAttribute('target') || '#app'
+    const container = document.querySelector(targetSel)
+    if (container) AIPLANG.boot(script.textContent, container)
+  }
+})

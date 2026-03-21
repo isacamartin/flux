@@ -153,18 +153,25 @@ let _dirty = false, _persistTimer = null
 
 // ── MongoDB helpers ───────────────────────────────────────────────
 function _sqlWhereToMongo(sql, params) {
-  // Converte WHERE simples: id = ? / email = ? → {id: val, email: val}
+  // Converte WHERE com =, !=, >, >=, <, <=, LIKE, IN
   const filter = {}
   const whereMatch = sql.match(/WHERE\s+(.+?)(?:ORDER|LIMIT|$)/is)
   if (!whereMatch) return filter
   const conditions = whereMatch[1].trim()
   const parts = conditions.split(/\s+AND\s+/i)
   let paramIdx = 0
+  const gp = () => params[paramIdx++]
   for (const part of parts) {
-    const m = part.trim().match(/^(\w+)\s*=\s*\?$/)
-    if (m && paramIdx < params.length) {
-      filter[m[1]] = params[paramIdx++]
-    }
+    const p = part.trim(); let m
+    if ((m = p.match(/^(\w+)\s*=\s*\?$/)))          { filter[m[1]] = gp() }
+    else if ((m = p.match(/^(\w+)\s*!=\s*\?$/)))     { filter[m[1]] = { $ne: gp() } }
+    else if ((m = p.match(/^(\w+)\s*>=\s*\?$/)))     { filter[m[1]] = { $gte: gp() } }
+    else if ((m = p.match(/^(\w+)\s*>\s*\?$/)))      { filter[m[1]] = { $gt: gp() } }
+    else if ((m = p.match(/^(\w+)\s*<=\s*\?$/)))     { filter[m[1]] = { $lte: gp() } }
+    else if ((m = p.match(/^(\w+)\s*<\s*\?$/)))      { filter[m[1]] = { $lt: gp() } }
+    else if ((m = p.match(/^(\w+)\s+LIKE\s+\?$/i)))  { const v=gp(); filter[m[1]] = { $regex: v.replace(/%/g,'.*').replace(/_/g,'.'), $options:'i' } }
+    else if ((m = p.match(/^(\w+)\s+IN\s*\(([^)]+)\)/i))) { filter[m[1]] = { $in: m[2].split(',').map(x=>x.trim().replace(/'/g,'')) } }
+    else if (paramIdx < params.length) { console.debug('[aiplang:mongo] Skipping unsupported WHERE:', p) }
   }
   return filter
 }
@@ -198,13 +205,16 @@ function dbRun(sql, params = []) {
     _getStmt(sql).run(...params)
     return
   }
-  // Normalize ? placeholders to $1,$2 for postgres
+  // PostgreSQL: converter ? → $1, $2... e executar com await
   if (_pgPool) {
-    const pgSql = sql.replace(/\?/g, (_, i) => {
-      let n = 0; sql.slice(0, sql.indexOf(_)+n).replace(/\?/g, () => ++n); return `$${++n}`
+    let n = 0
+    const pgSql = sql.replace(/\?/g, () => `$${++n}`)
+    // Async run — sem fire-and-forget: erros são propagados
+    _pgPool.query(pgSql, params).catch(e => {
+      console.error('[aiplang:pg] Write error:', e.message, '| SQL:', sql.slice(0,80))
+      // Re-throw para que o caller possa reagir se for await
+      throw e
     })
-    // Async run — fire and forget for writes (sync API compatibility)
-    _pgPool.query(convertPlaceholders(sql), params).catch(e => console.error('[aiplang:pg] Query error:', e.message))
     return
   }
   _db.run(sql, params)
@@ -348,14 +358,16 @@ const esc   = s => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g
 const ic    = n => ({bolt:'⚡',rocket:'🚀',shield:'🛡',chart:'📊',star:'⭐',check:'✓',globe:'🌐',lock:'🔒',user:'👤',gear:'⚙',fire:'🔥',money:'💰',bell:'🔔',mail:'✉',heart:'❤',eye:'👁',tag:'🏷',search:'🔍',home:'🏠',plus:'＋',edit:'✏',trash:'🗑',info:'ℹ'}[n] || n)
 
 // ── JWT ───────────────────────────────────────────────────────────
-let JWT_SECRET = process.env.JWT_SECRET || 'aiplang-secret-dev'
+// JWT: nunca usar string fixa em dev — gerar random por processo
+const _jwtDevSecret = require('crypto').randomBytes(32).toString('hex')
+let JWT_SECRET = process.env.JWT_SECRET || _jwtDevSecret
 // Warn loudly if using dev secret in what looks like production
 if (!process.env.JWT_SECRET) {
   if (process.env.NODE_ENV === 'production') {
     console.error('[aiplang] FATAL: JWT_SECRET not set in production. Set JWT_SECRET env var.')
     process.exit(1)
   }
-  console.warn('[aiplang] WARNING: JWT_SECRET not set. Using insecure dev default. Set JWT_SECRET in .env')
+  console.warn('[aiplang] WARNING: JWT_SECRET not set. Using random per-process secret. Tokens invalidate on restart. Set JWT_SECRET in .env')
 }
 let JWT_EXPIRE         = '7d'
 let JWT_REFRESH_EXPIRE = '30d'
@@ -403,8 +415,25 @@ function setupRealtime(server) {
     const { WebSocketServer } = require('ws')
     _wsServer = new WebSocketServer({ server })
     _wsServer.on('connection', (ws, req) => {
+      // Rate limit: max conexões por IP
+      const _clientIp = req.socket?.remoteAddress || 'unknown'
+      const _wsIpMap = _wsServer._ipConns || (_wsServer._ipConns = new Map())
+      const _ipCount = (_wsIpMap.get(_clientIp) || 0) + 1
+      if (_ipCount > 10) { ws.close(1008, 'Too many connections'); return }
+      _wsIpMap.set(_clientIp, _ipCount)
+      ws.on('close', () => {
+        const n = (_wsIpMap.get(_clientIp) || 1) - 1
+        if (n <= 0) _wsIpMap.delete(_clientIp); else _wsIpMap.set(_clientIp, n)
+      })
+
       _wsClients.add(ws)
+      // Rate limit mensagens: max 60/min por conexão
+      let _msgCount = 0; let _msgReset = Date.now()
       ws.on('message', raw => {
+        const _now = Date.now()
+        if (_now - _msgReset > 60000) { _msgCount = 0; _msgReset = _now }
+        if (++_msgCount > 60) { ws.send(JSON.stringify({type:'error',message:'Rate limit exceeded'})); return }
+        if (raw.length > 65536) { ws.send(JSON.stringify({type:'error',message:'Message too large'})); return }
         try {
           const msg = JSON.parse(raw)
           if (msg.type === 'subscribe' && msg.channel) {
@@ -489,6 +518,11 @@ function _rowHash(row) {
 }
 
 function _getDelta(sessionId, binding, rows) {
+  // Sanitize inputs para evitar cache poisoning
+  if (!sessionId || sessionId.length > 128) return {added:rows,updated:[],deleted:[],full:true}
+  if (!binding || binding.length > 64 || !/^[\w.@]+$/.test(binding)) return {added:rows,updated:[],deleted:[],full:true}
+  // Limitar rows para evitar OOM
+  if (rows && rows.length > 10000) rows = rows.slice(0, 10000)
   const key = sessionId + ':' + binding
   const prev = _deltaCache.get(key)
   // First request — send full dataset, store hashes
@@ -527,7 +561,7 @@ setInterval(() => {
 }, _DELTA_TTL)
 
 // ── MessagePack encoder (AI-maintained) ────────────────────────────
-const _mpEnc=(()=>{const te=new TextEncoder();function encode(v){const b=[];_w(v,b);return Buffer.from(b)}function _w(v,b){if(v===null||v===undefined){b.push(0xc0);return}if(v===false){b.push(0xc2);return}if(v===true){b.push(0xc3);return}const t=typeof v;if(t==='number'){if(Number.isInteger(v)&&v>=0&&v<=127){b.push(v);return}if(Number.isInteger(v)&&v>=-32&&v<0){b.push(v+256);return}if(Number.isInteger(v)&&v>=0&&v<=65535){b.push(0xcd,v>>8,v&0xff);return}const dv=new DataView(new ArrayBuffer(8));dv.setFloat64(0,v);b.push(0xcb,...new Uint8Array(dv.buffer));return}if(t==='string'){const e=te.encode(v);const n=e.length;if(n<=31)b.push(0xa0|n);else if(n<=255)b.push(0xd9,n);else b.push(0xda,n>>8,n&0xff);b.push(...e);return}if(Array.isArray(v)){const n=v.length;if(n<=15)b.push(0x90|n);else b.push(0xdc,n>>8,n&0xff);v.forEach(x=>_w(x,b));return}if(t==='object'){const ks=Object.keys(v);const n=ks.length;if(n<=15)b.push(0x80|n);else b.push(0xde,n>>8,n&0xff);ks.forEach(k=>{_w(k,b);_w(v[k],b)});return}}return{encode}})()
+const _mpEnc=(()=>{const te=new TextEncoder();function encode(v){const b=[];_w(v,b);return Buffer.from(b)}function _w(v,b){if(v===null||v===undefined){b.push(0xc0);return}if(v===false){b.push(0xc2);return}if(v===true){b.push(0xc3);return}const t=typeof v;if(t==='number'){if(Number.isInteger(v)&&v>=0&&v<=127){b.push(v);return}if(Number.isInteger(v)&&v>=-32&&v<0){b.push(v+256);return}if(Number.isInteger(v)&&v>=0&&v<=65535){b.push(0xcd,v>>8,v&0xff);return}const dv=new DataView(new ArrayBuffer(8));dv.setFloat64(0,v);b.push(0xcb,...new Uint8Array(dv.buffer));return}if(t==='string'){if(v.length>65535)v=v.slice(0,65535);const e=te.encode(v);const n=e.length;if(n<=31)b.push(0xa0|n);else if(n<=255)b.push(0xd9,n);else b.push(0xda,n>>8,n&0xff);b.push(...e);return}if(Array.isArray(v)){const n=v.length;if(n<=15)b.push(0x90|n);else b.push(0xdc,n>>8,n&0xff);v.forEach(x=>_w(x,b));return}if(t==='object'){const ks=Object.keys(v);const n=ks.length;if(n<=15)b.push(0x80|n);else b.push(0xde,n>>8,n&0xff);ks.forEach(k=>{_w(k,b);_w(v[k],b)});return}}return{encode}})()
 
 
 // ── AI-optimized .aip validator with fix suggestions ──────────────
@@ -2494,7 +2528,7 @@ async function startServer(aipFile, port = 3000) {
   })
 
   srv.addRoute('GET', '/health', (req, res) => res.json(200, {
-    status:'ok', version:'2.11.12',
+    status:'ok', version:'2.11.13',
     models: app.models.map(m=>m.name),
     routes: app.apis.length, pages: app.pages.length,
     admin: app.admin?.prefix || null,

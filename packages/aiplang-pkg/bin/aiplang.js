@@ -49,7 +49,7 @@ class Spinner {
   }
 }
 
-const VERSION     = '2.11.12'
+const VERSION     = '2.11.13'
 const RUNTIME_DIR = path.join(__dirname, '..', 'runtime')
 const cmd         = process.argv[2]
 const args        = process.argv.slice(3)
@@ -702,7 +702,7 @@ function generateTypes(app, srcFile) {
   }
 
   lines.push(`// ── aiplang version ──────────────────────────────────────────`)
-  lines.push(`export const AIPLANG_VERSION     = '2.11.12'`)
+  lines.push(`export const AIPLANG_VERSION     = '2.11.13'`)
   lines.push(``)
   return lines.join('\n')
 }

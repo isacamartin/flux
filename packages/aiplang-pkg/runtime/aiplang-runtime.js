@@ -1,3 +1,47 @@
+
+// _fastEq: comparação rápida sem JSON.stringify (O(1) para primitivos, O(n) para arrays)
+function _fastEq(a, b) {
+  if (a === b) return true
+  if (typeof a !== typeof b) return false
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    // Verificação por comprimento + hash dos IDs (rápido para listas de dados)
+    const aId = a[0]?.id ?? a[0]?.uuid ?? JSON.stringify(a[0])
+    const bId = b[0]?.id ?? b[0]?.uuid ?? JSON.stringify(b[0])
+    const aLast = a[a.length-1]?.id ?? JSON.stringify(a[a.length-1])
+    const bLast = b[b.length-1]?.id ?? JSON.stringify(b[b.length-1])
+    return aId === bId && aLast === bLast
+  }
+  if (a && b && typeof a === 'object') {
+    const ak = Object.keys(a), bk = Object.keys(b)
+    if (ak.length !== bk.length) return false
+    return ak.every(k => a[k] === b[k])
+  }
+  return false
+}
+
+
+// _safeFilter: substitui new Function() — suporta field==val, field>val, field.includes(val)
+function _safeFilter(expr) {
+  return function(item) {
+    try {
+      // Suportar: item.field === 'val', item.field > 5, item.field.includes('x')
+      const cleaned = expr.trim()
+      // Operadores simples: field op value
+      let m
+      if ((m = cleaned.match(/^item\.(\w+)\s*===?\s*['"]([^'"]+)['"]$/)))  return String(item[m[1]]) === m[2]
+      if ((m = cleaned.match(/^item\.(\w+)\s*!==?\s*['"]([^'"]+)['"]$/))) return String(item[m[1]]) !== m[2]
+      if ((m = cleaned.match(/^item\.(\w+)\s*>\s*([\d.]+)$/)))            return Number(item[m[1]]) > Number(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)\s*>=\s*([\d.]+)$/)))           return Number(item[m[1]]) >= Number(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)\s*<\s*([\d.]+)$/)))            return Number(item[m[1]]) < Number(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)\s*<=\s*([\d.]+)$/)))           return Number(item[m[1]]) <= Number(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)\.includes\(['"]([^'"]+)['"]\)$/))) return String(item[m[1]]||'').includes(m[2])
+      if ((m = cleaned.match(/^item\.(\w+)$/)))                            return !!item[m[1]]
+      return true // expressão não reconhecida → não filtrar
+    } catch { return true }
+  }
+}
+
 /**
  * aiplang-runtime.js — aiplang Runtime v2.1
  * Reactive state + SPA routing + DOM engine + query engine
@@ -193,7 +237,9 @@ class QueryEngine {
       if (filterMatch) {
         const arr = state.get(filterMatch[1]) || []
         try {
-          const fn = new Function('item', `return (${filterMatch[2]})(item)`)
+          // Seguro: eval substituído por parser de expressão simples
+          const _fexpr = filterMatch[2]
+          const fn = _safeFilter(_fexpr)
           state.set(filterMatch[1], arr.filter(fn))
         } catch(e) {}
         return
