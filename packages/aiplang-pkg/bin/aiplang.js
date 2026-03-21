@@ -5,7 +5,7 @@ const fs   = require('fs')
 const path = require('path')
 const http = require('http')
 
-const VERSION     = '2.11.1'
+const VERSION     = '2.11.2'
 const RUNTIME_DIR = path.join(__dirname, '..', 'runtime')
 const cmd         = process.argv[2]
 const args        = process.argv.slice(3)
@@ -443,6 +443,14 @@ if (cmd==='new') {
   process.exit(0)
 }
 
+// Type system: known field types
+const _KNOWN_TYPES = new Set([
+  'text','string','varchar','int','integer','float','double','number',
+  'bool','boolean','email','url','uri','phone','date','datetime','timestamp',
+  'uuid','json','jsonb','enum','file','image','color','slug',
+  'bigint','smallint','tinyint','currency','money','price'
+])
+
 function validateAipSrc(source) {
   const errors = []
   const lines = source.split('\n')
@@ -466,6 +474,17 @@ function validateAipSrc(source) {
     }
     if (/^table\s*\{/.test(line)) {
       errors.push({ line:i+1, code:line, message:"table missing @binding — e.g.: table @users { Name:name | ... }", severity:'error' })
+    }
+
+    // Type check on model fields: field : unknowntype
+    if (/^\s{2,}\w+\s*:\s*\w+/.test(lines[i]) && !line.startsWith('api') && !line.startsWith('model') && !line.startsWith('~')) {
+      const typePart = line.split(':')[1]?.trim().split(/\s/)[0]?.toLowerCase()
+      if (typePart && typePart.length > 1 && !_KNOWN_TYPES.has(typePart) &&
+          !['pk','auto','required','unique','hashed','index','asc','desc','fk'].includes(typePart)) {
+        errors.push({ line:i+1, code:line,
+          message:`Tipo desconhecido: '${typePart}'. Tipos válidos: text, integer, float, bool, email, url, date, datetime, uuid, enum, json`,
+          fix: lines[i].replace(typePart, 'text').trim(), severity:'warning' })
+      }
     }
   }
   return errors
@@ -1169,7 +1188,29 @@ function rForm(b) {
     if(!f) return ''
     const inp=f.type==='select'
       ?`<select class="fx-input" name="${esc(f.name)}"><option value="">Select...</option></select>`
-      :`<input class="fx-input" type="${esc(f.type||'text')}" name="${esc(f.name)}" placeholder="${esc(f.placeholder)}">`
+      :(() => {
+        const _ft = (f.type||'text').toLowerCase()
+        const _htmlType = {
+          email:'email', url:'url', phone:'tel', tel:'tel',
+          integer:'number', int:'number', float:'number', number:'number',
+          date:'date', datetime:'datetime-local', timestamp:'datetime-local',
+          bool:'checkbox', boolean:'checkbox',
+          password:'password', hashed:'password',
+          color:'color', range:'range', file:'file'
+        }[_ft] || 'text'
+        const _numAttrs = (_htmlType==='number' && f.constraints)
+          ? (f.constraints.min!=null?` min="${f.constraints.min}"`:'')+
+            (f.constraints.max!=null?` max="${f.constraints.max}"`:'')
+          : ''
+        const _required = f.required ? ' required' : ''
+        if (_ft === 'textarea' || _ft === 'longtext') {
+          return `<textarea class="fx-input" name="${esc(f.name)}" placeholder="${esc(f.placeholder)}"${_required}></textarea>`
+        }
+        if (_htmlType === 'checkbox') {
+          return `<label class="fx-checkbox-label"><input class="fx-checkbox" type="checkbox" name="${esc(f.name)}"${_required}> ${esc(f.placeholder||f.label||f.name)}</label>`
+        }
+        return `<input class="fx-input" type="${_htmlType}" name="${esc(f.name)}" placeholder="${esc(f.placeholder)}"${_numAttrs}${_required}>`
+      })()
     return`<div class="fx-field"><label class="fx-label">${esc(f.label)}</label>${inp}</div>`
   }).join('')
   const label=b.submitLabel||'Enviar'
